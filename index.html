@@ -1,0 +1,4076 @@
+<!DOCTYPE html>
+<!--
+  ============================================================================
+  MONITOREO DE PLAGAS · RoyAgrico
+  ----------------------------------------------------------------------------
+  Aplicación web (PWA) para captura de datos de monitoreo de plagas en campo.
+  Diseñada para uso móvil offline por plagueros de fruta de hueso.
+
+  Arquitectura:
+    - Frontend:  este archivo (HTML + CSS + JavaScript, sin frameworks).
+    - Offline:   Service Worker (sw.js) + localStorage para persistencia.
+    - Instalable: manifest.json convierte la web en PWA nativa.
+    - Backend:   Supabase (PostgreSQL managed) vía API REST.
+
+  Persistencia local (localStorage):
+    Todas las claves con prefijo "monitoreo.*" para agrupación clara.
+    Ver constantes K_* en el bloque "PERSISTENCIA LOCAL".
+
+  Conexión con backend:
+    Ver funciones supabaseGet() y supabasePost() en el bloque "SUPABASE".
+    Son los dos únicos puntos de contacto con la base de datos.
+
+  Autor: Álvaro Parra Bocccoli
+
+  ----------------------------------------------------------------------------
+  VERSIÓN v25a (fork experimental)
+  ----------------------------------------------------------------------------
+  Nuevo respecto a v24i:
+    - Descarga de polígonos desde Supabase (Admin > "Descargar del servidor").
+    - Requiere columna 'geometria' (PostGIS) en la tabla 'parcelas'.
+    - Devuelto por Supabase como GeoJSON, se transforma al formato interno.
+    - Timestamp de última descarga persistido en 'monitoreo.poligonos_ts'.
+    - Se conserva "Cargar KMZ" como fallback manual (por si servidor caído).
+    - Todo lo demás idéntico a v24i (captura, GPS, PDFs, sincronización).
+  ============================================================================
+-->
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="theme-color" content="#0b6e4f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Monitoreo plagas">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='24' fill='%230b6e4f'/%3E%3Ctext x='96' y='132' font-family='sans-serif' font-size='110' font-weight='700' text-anchor='middle' fill='%23fff'%3EM%3C/text%3E%3C/svg%3E">
+<link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="10" fill="%230b6e4f"/><text x="32" y="45" font-family="sans-serif" font-size="38" font-weight="700" text-anchor="middle" fill="%23fff">S</text></svg>'>
+<title>Monitoreo de plagas · v25a</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#eef0ef;color:#14181a;font-size:15px}
+header{background:#0b6e4f;color:#fff;padding:10px 14px;position:sticky;top:0;z-index:10;display:flex;justify-content:space-between;align-items:center}
+header .t{font-size:16px;font-weight:700}
+header .s{font-size:11px;opacity:.9;margin-top:1px}
+.chip{background:rgba(255,255,255,.2);padding:6px 11px;border-radius:12px;font-size:12px;font-weight:600;border:none;color:#fff;cursor:pointer}
+.chip.ok{background:#7dd870;color:#0a3d1f}
+.chip.mal{background:#ff9a8b;color:#5a1810}
+main{padding:10px;max-width:1100px;margin:0 auto;padding-bottom:70px}
+h2{font-size:11px;color:#5b6467;text-transform:uppercase;letter-spacing:.5px;margin:12px 0 6px}
+.card{background:#fff;border:1px solid #d5dad8;border-radius:10px;padding:10px;margin-bottom:8px}
+select,input,button,textarea{font-family:inherit;font-size:15px}
+select.parcela{width:100%;padding:12px 14px;border:2px solid #d5dad8;border-radius:10px;background:#fff;color:#0b6e4f;font-weight:700;font-size:17px;appearance:none;-webkit-appearance:none}
+.contador-grande{display:flex;justify-content:space-between;align-items:center;margin-top:10px;gap:10px}
+.contador-grande .n{font-size:32px;font-weight:300;color:#0b6e4f;line-height:1}
+.contador-grande .n span{font-size:16px;color:#5b6467;font-weight:400}
+.barra-avance{flex:1;height:8px;background:#e0e5e2;border-radius:4px;overflow:hidden;margin:0 10px}
+.barra-avance i{display:block;height:100%;background:linear-gradient(90deg,#0b6e4f,#7dd870);border-radius:4px;width:0%;transition:width .25s}
+.estado-parc{font-size:11px;padding:4px 10px;border-radius:11px;font-weight:700;text-transform:uppercase;letter-spacing:.3px}
+.estado-parc.en-curso{background:#e2f0ea;color:#0b6e4f}
+.estado-parc.finalizada{background:#f2e5d0;color:#7a5230}
+.info-muestreo{font-size:11px;color:#5b6467;padding:5px 9px;background:#f7f9f8;border-radius:5px;margin-top:6px;display:none}
+.mini{width:100%;height:150px;border-radius:8px;background:#e8ece9;margin-top:8px;border:1px solid #d5dad8}
+.parcela-detect{background:#fdf3e0;border:1px solid #e8d4a8;border-radius:8px;padding:9px;margin-top:8px;font-size:13px;color:#9a6700;display:none}
+.parcela-detect.on{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.parcela-detect button{background:#0b6e4f;color:#fff;border:none;padding:7px 14px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer}
+.acc-guardar-top{display:flex;gap:8px;margin-top:8px;margin-bottom:10px}
+.acc-guardar{display:flex;gap:8px;margin-top:12px}
+.plagas{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px}
+.plaga{background:#fff;border:2px solid #d5dad8;border-radius:10px;padding:10px 6px;text-align:center;cursor:pointer;user-select:none;min-height:72px;display:flex;flex-direction:column;justify-content:center;align-items:center;position:relative;transition:transform .06s}
+.plaga:active{transform:scale(0.97)}
+.plaga .n{font-size:13px;font-weight:700;color:#14181a;line-height:1.15}
+.plaga .c{font-size:26px;font-weight:300;color:#c0c7c3;margin-top:4px;line-height:1}
+.plaga.tocado{border-color:#0b6e4f;background:#e2f0ea}
+.plaga.tocado .c{color:#0b6e4f;font-weight:500}
+.plaga .quitar{position:absolute;top:4px;right:4px;background:#fff;border:1px solid #d5dad8;color:#5b6467;width:24px;height:24px;border-radius:50%;font-size:15px;line-height:1;padding:0;cursor:pointer;display:none;font-weight:700}
+.plaga.tocado .quitar{display:block}
+.nota-wrap{margin-top:10px;background:#fff;border:1px solid #d5dad8;border-radius:8px;padding:10px}
+.nota-wrap summary{cursor:pointer;font-size:12px;color:#5b6467;padding:3px 0;list-style:none;font-weight:600}
+.nota-wrap summary::before{content:"+ ";color:#0b6e4f;font-weight:700}
+.nota-wrap[open] summary::before{content:"- "}
+.nota-wrap textarea{width:100%;border:1px solid #d5dad8;border-radius:6px;padding:8px;font-size:13px;margin-top:6px;resize:vertical;min-height:50px}
+.gps-info{font-size:11px;color:#5b6467;padding:7px 10px;background:#f7f9f8;border-radius:6px;margin-top:8px;border:1px solid #eaeeeb}
+.gps-info.on{background:#e2f0ea;color:#0b6e4f;border-color:#c8dfd2}
+.btn{padding:14px;border-radius:10px;border:none;font-size:15px;font-weight:700;cursor:pointer;flex:1}
+.btn:active{transform:scale(0.98)}
+.btn-sin-cap{background:#5b6467;color:#fff}
+.btn-guardar{background:#0b6e4f;color:#fff}
+.btn-s{background:#f2f5f3;color:#14181a;border:1px solid #d5dad8}
+.acc-muestreo{display:flex;gap:8px;margin-top:10px}
+.btn-fin{background:#fff;border:2px solid #b3261e;color:#b3261e;padding:11px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;text-align:center;flex:1}
+.btn-desh{background:#fff;border:2px dashed #b3261e;color:#b3261e;padding:11px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;text-align:center;flex:1;visibility:hidden}
+.btn-desh.on{visibility:visible}
+.pie{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #d5dad8;padding:9px 14px;display:flex;justify-content:space-between;align-items:center;gap:10px}
+.pie .n{font-size:12px;color:#5b6467}
+.pie .n b{color:#0b6e4f;font-size:16px}
+.velo{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:none;align-items:flex-start;justify-content:center;padding:20px 16px;overflow-y:auto}
+.velo.on{display:flex}
+.hoja{background:#fff;border-radius:12px;padding:18px;max-width:500px;width:100%;max-height:85vh;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.hoja h3{margin:0 0 12px;font-size:17px}
+.hoja label{display:block;margin-bottom:10px;font-size:13px;color:#5b6467}
+.hoja input[type=file],.hoja input[type=password],.hoja input[type=text],.hoja select{width:100%;padding:10px;border:1px solid #d5dad8;border-radius:6px;margin-top:5px;font-size:14px}
+.hoja .acc-guardar-top{margin-top:14px}
+.razones-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px}
+.razon-op{padding:12px;border:2px solid #d5dad8;border-radius:8px;cursor:pointer;text-align:center;font-size:14px;font-weight:600;background:#fff}
+.razon-op.sel{border-color:#0b6e4f;background:#e2f0ea;color:#0b6e4f}
+.toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#14181a;color:#fff;padding:12px 20px;border-radius:8px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:10000;text-align:center;max-width:85%}
+.toast.on{opacity:1}
+.tabs{display:flex;background:#fff;border-bottom:1px solid #d5dad8;position:sticky;top:56px;z-index:9}
+.tabs button{flex:1;padding:12px;border:none;background:none;font-size:14px;font-weight:600;color:#5b6467;border-bottom:3px solid transparent;cursor:pointer}
+.tabs button.on{color:#0b6e4f;border-color:#0b6e4f}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:7px 8px;border-bottom:1px solid #eee;text-align:left}
+th{background:#f7f9f8;color:#5b6467;font-size:10px;text-transform:uppercase;letter-spacing:.4px}
+td b{color:#0b6e4f}
+.vacio{padding:22px;text-align:center;color:#8b9295;font-size:14px}
+.parc-item{border-left:4px solid #d5dad8;padding:10px 12px;margin-bottom:8px;background:#fff;border-radius:0 8px 8px 0}
+.parc-item.en-curso{border-color:#0b6e4f}
+.parc-item.finalizada{border-color:#7a5230}
+.parc-item .h{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.parc-item .h b{font-size:15px;color:#14181a}
+.parc-item .info{font-size:12px;color:#5b6467}
+#v-mapa{position:relative}
+.mapa-grande{width:100%;height:65vh;border-radius:10px;background:#e8ece9;border:1px solid #d5dad8}
+.mapa-leyenda{font-size:11px;color:#5b6467;margin-top:6px;display:flex;gap:14px;flex-wrap:wrap}
+.mapa-leyenda span{display:flex;align-items:center;gap:5px}
+.mapa-leyenda i{width:10px;height:10px;border-radius:50%;display:inline-block}
+
+/* En pantallas medianas y grandes: más aire */
+@media (min-width: 600px){
+  body{font-size:16px}
+  main{padding:14px;padding-bottom:90px}
+  .plagas{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:9px}
+  .plaga{min-height:95px;padding:14px 8px}
+  .plaga .n{font-size:15px}
+  .plaga .c{font-size:32px;margin-top:6px}
+  .mini{height:220px}
+  .btn{padding:16px;font-size:16px}
+  .btn-fin,.btn-desh{padding:13px;font-size:14px}
+}
+@keyframes pulseRed { 0%,100%{ box-shadow:0 0 0 rgba(195,51,51,0.5); } 50%{ box-shadow:0 0 12px rgba(195,51,51,0.9); } }
+</style>
+</head>
+<body>
+
+<header style="position:relative">
+  <div>
+    <div class="t">Monitoreo de plagas · <span id="cabFincaLabel" style="font-weight:700">—</span></div>
+    <div class="s" id="fecha">-</div>
+  </div>
+  <div style="display:flex;gap:6px">
+    <button class="chip" id="chip-red">Red</button>
+    <button class="chip" id="chip-gps" onclick="pedirGPS()">📍 Activar GPS</button>
+  </div>
+  <div style="position:absolute;bottom:2px;right:6px;font-size:8px;color:rgba(255,255,255,0.45);font-weight:500;letter-spacing:0.3px">v25a</div>
+</header>
+
+<div class="tabs">
+  <button id="t-sac" class="on" onclick="ir('sac')">Sacudir</button>
+  <button id="t-mapa" onclick="ir('mapa')">Mapa</button>
+  <button id="t-res" onclick="ir('res')">Resumen</button>
+  <button id="t-rec" onclick="ir('rec')">Recientes</button>
+  <button id="t-admin" onclick="ir('admin')">⚙</button>
+</div>
+
+<main>
+  <section id="v-sac">
+    <div class="card">
+      <select class="parcela" id="sel" onchange="cambParc()">
+        <option value="">- Elige parcela -</option>
+      </select>
+
+      <div id="parcela-detect" class="parcela-detect">
+        <span id="parcela-detect-txt">El GPS te sitúa en otra parcela</span>
+        <button onclick="usarDetectada()">Cambiar</button>
+      </div>
+
+      <div id="finalizada-aviso" class="finalizada-aviso" style="display:none"></div>
+
+      <div id="cont-sac" style="display:none">
+        <div class="contador-grande">
+          <div class="n"><span id="n-hech">0</span> <span>/ 100</span></div>
+          <div class="barra-avance"><i id="barra-avance-i"></i></div>
+          <span class="estado-parc en-curso" id="estado-parc">EN CURSO</span>
+        </div>
+        <div id="info-muestreo" class="info-muestreo"></div>
+        <div id="mini" class="mini"></div>
+      </div>
+    </div>
+
+    <div id="cont-plagas" style="display:none">
+      <!-- Botones de guardar ARRIBA, siempre visibles -->
+      <div class="acc-guardar-top">
+        <button class="btn btn-sin-cap" onclick="guardarSac(true)">Sin capturas</button>
+        <button class="btn btn-guardar" onclick="guardarSac(false)">Guardar con capturas</button>
+      </div>
+
+      <h2>Toca las plagas encontradas en la sacudida actual</h2>
+      <div class="plagas" id="plagas"></div>
+
+      <!-- Acciones del muestreo DEBAJO de las plagas para evitar toques accidentales -->
+      <div class="acc-muestreo">
+        <button class="btn-desh" id="btn-deshacer-sac" onclick="deshacerUltimaSac()">↺ Deshacer última</button>
+        <button class="btn-fin" onclick="finalizarParcela()">✓ Finalizar parcela</button>
+      </div>
+
+      <details class="nota-wrap" id="nota-wrap">
+        <summary>Añadir observación (opcional)</summary>
+        <textarea id="nota" placeholder="Ej: daño de granizo, ejemplar poco común, rama seca..."></textarea>
+      </details>
+
+      <div class="gps-info" id="gps-info">Sin ubicación GPS todavía</div>
+    </div>
+  </section>
+
+  <section id="v-mapa" style="display:none">
+    <div id="mapa-grande" class="mapa-grande"></div>
+    <div class="mapa-leyenda">
+      <span><i style="background:#ffea00"></i>Parcela</span>
+      <span><i style="background:#0b6e4f"></i>Sin capturas</span>
+      <span><i style="background:#d9a520"></i>Con capturas</span>
+      <span><i style="background:#1b5e9e"></i>Tu posición GPS</span>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div id="mapa-info" class="vacio">Toca un polígono para ir a esa parcela</div>
+    </div>
+  </section>
+
+  <section id="v-res" style="display:none">
+    <h2>Muestreos activos de hoy</h2>
+    <div id="lista-parcelas"></div>
+  </section>
+
+  <section id="v-rec" style="display:none">
+    <h2>Últimos 15 días</h2>
+    <div id="lista-recientes"></div>
+  </section>
+
+  <section id="v-admin" style="display:none">
+    <div id="admin-pin" style="padding:20px 0">
+      <h2>Entrar en Administración</h2>
+      <div class="card">
+        <label style="font-size:13px;color:#5b6467">PIN de administrador
+          <input type="password" id="pin-tab" placeholder="0000" style="width:100%;padding:12px;border:1px solid #d5dad8;border-radius:6px;margin-top:6px;font-size:16px">
+        </label>
+        <div class="acc-guardar">
+          <button class="btn btn-s" onclick="ir('sac')">Cancelar</button>
+          <button class="btn btn-guardar" onclick="checkPinTab()">Entrar</button>
+        </div>
+      </div>
+    </div>
+    <div id="admin-content" style="display:none"></div>
+  </section>
+</main>
+
+<div class="pie">
+  <div class="n"><b id="pie-n">0</b> sacudidas hoy</div>
+  <div class="n" id="pie-parc">Sin parcela</div>
+</div>
+
+<div class="velo" id="velo" onclick="if(event.target.id==='velo')cerrar()">
+  <div class="hoja" id="hoja"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+
+const PIN_ADMIN = "2468";
+// CATÁLOGO DE PLAGAS
+// Fuente oficial única: Supabase (tablas catalogo_plagas + catalogo_subtipos)
+// Se descarga desde Admin > Actualizar catálogos y queda en localStorage.
+// Al arrancar la app, se hidrata desde localStorage.
+// Si nunca se descargó -> array vacío + pantalla bloqueante al intentar sacudir.
+let CATALOGO = [];
+
+const K_CATALOGO = "monitoreo.catalogo";
+const K_CATALOGO_DESC = "monitoreo.catalogo_ts";  // timestamp última descarga
+
+function cargarCatalogoDesdeStorage(){
+  // Intenta cargar de localStorage; si no hay o está corrupto, deja vacío (bloqueo activado)
+  try{
+    const raw = localStorage.getItem(K_CATALOGO);
+    if(raw){
+      const arr = JSON.parse(raw);
+      if(Array.isArray(arr) && arr.length > 0){
+        CATALOGO = arr;
+        return true;
+      }
+    }
+  } catch(e){ console.warn("Catálogo local corrupto:", e); }
+  CATALOGO = [];
+  return false;
+}
+
+async function descargarCatalogoDesdeSupabase(){
+  // Descarga plagas + subtipos, los estructura, guarda en localStorage y refresca CATALOGO
+  const [plagas, subtipos] = await Promise.all([
+    supabaseGet("catalogo_plagas", "select=id,codigo,nombre,orden,activo&order=orden.asc"),
+    supabaseGet("catalogo_subtipos", "select=id,plaga_id,codigo,nombre,orden,activo_para_foco&order=orden.asc")
+  ]);
+  // Construir estructura idéntica al hardcoded: [{cod, n, subs?:[{cod, n, activo}]}]
+  const subtiposPorPlaga = {};
+  subtipos.forEach(s => {
+    const parent = plagas.find(p => p.id === s.plaga_id);
+    if(!parent) return;
+    if(!subtiposPorPlaga[parent.codigo]) subtiposPorPlaga[parent.codigo] = [];
+    subtiposPorPlaga[parent.codigo].push({
+      cod: s.codigo,
+      n: s.nombre,
+      activo: !!s.activo_para_foco
+    });
+  });
+  const cat = plagas
+    .filter(p => p.activo)
+    .map(p => {
+      const entry = { cod: p.codigo, n: p.nombre };
+      if(subtiposPorPlaga[p.codigo] && subtiposPorPlaga[p.codigo].length > 0){
+        entry.subs = subtiposPorPlaga[p.codigo];
+      }
+      return entry;
+    });
+  // Cache mapas de IDs también (para sincronización con Supabase)
+  const plagasIdMap = {};
+  plagas.forEach(p => { plagasIdMap[p.codigo] = p.id; });
+  const subtiposIdMap = {};
+  subtipos.forEach(s => {
+    const parent = plagas.find(p => p.id === s.plaga_id);
+    if(parent) subtiposIdMap[parent.codigo + "|" + s.codigo] = s.id;
+  });
+  _plagasIdMap = plagasIdMap;
+  _subtiposIdMap = subtiposIdMap;
+  localStorage.setItem("monitoreo.plagas_map", JSON.stringify(plagasIdMap));
+  localStorage.setItem("monitoreo.subtipos_map", JSON.stringify(subtiposIdMap));
+  // Guardar catálogo y refrescar variable global
+  localStorage.setItem(K_CATALOGO, JSON.stringify(cat));
+  localStorage.setItem(K_CATALOGO_DESC, new Date().toISOString());
+  CATALOGO = cat;
+  return cat;
+}
+
+const RAZONES_FIN = [
+  "Muestreo completo",
+  "Parcela pequeña",
+  "Fin de jornada",
+  "Condiciones adversas",
+  "Otro"
+];
+const K_SAC = "monitoreo.sacudidas";
+const K_MUESTREOS = "monitoreo.muestreos";
+const K_POLIGONOS = "monitoreo.poligonos";
+const K_PLAGUERO = "monitoreo.plaguero";
+const K_FINCAS = "monitoreo.fincas";           // Cache local de fincas (desde Supabase)
+const K_FINCA_ACTIVA = "monitoreo.finca_activa";   // ID de la finca activa
+const K_DESTINATARIOS = "monitoreo.destinatarios";  // emails por finca {"MEZ":["a@x","b@x"],...}
+const VENTANA_DESHACER_MS = 15000;
+
+// destinatarios de correos por finca
+function destinatariosGuardados(){
+  try{ return JSON.parse(localStorage.getItem(K_DESTINATARIOS) || "{}"); }
+  catch{ return {}; }
+}
+function destinatariosDeFinca(codigoFinca){
+  if(!codigoFinca) return [];
+  const todos = destinatariosGuardados();
+  return todos[codigoFinca] || [];
+}
+function guardarDestinatariosDeFinca(codigoFinca, lista){
+  const todos = destinatariosGuardados();
+  todos[codigoFinca] = lista;
+  localStorage.setItem(K_DESTINATARIOS, JSON.stringify(todos));
+}
+function validarEmail(str){
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((str||"").trim());
+}
+function añadirDestinatario(){
+  const fA = fincaActiva();
+  if(!fA){ mostrarErrorDest("Configura una finca activa primero"); return; }
+  const input = document.getElementById("input-nuevo-dest");
+  if(!input) return;
+  const emailTrim = (input.value||"").trim().toLowerCase();
+  if(!emailTrim){ mostrarErrorDest("Escribe un correo"); return; }
+  if(!validarEmail(emailTrim)){ mostrarErrorDest("Correo no válido"); return; }
+  const actuales = destinatariosDeFinca(fA.codigo);
+  if(actuales.includes(emailTrim)){ mostrarErrorDest("Ese correo ya estaba en la lista"); return; }
+  actuales.push(emailTrim);
+  guardarDestinatariosDeFinca(fA.codigo, actuales);
+  renderAdminContent();
+  // Reenfocar input tras el redraw
+  setTimeout(() => {
+    const nuevoInput = document.getElementById("input-nuevo-dest");
+    if(nuevoInput) nuevoInput.focus();
+  }, 50);
+}
+
+function mostrarErrorDest(msg){
+  const el = document.getElementById("err-dest");
+  if(!el) return;
+  el.textContent = msg;
+  el.style.display = "block";
+  setTimeout(() => { el.style.display = "none"; }, 3000);
+}
+
+function onKeydownDest(e){
+  if(e.key === "Enter"){ e.preventDefault(); añadirDestinatario(); }
+}
+
+function borrarDestinatario(email){
+  const fA = fincaActiva();
+  if(!fA) return;
+  const actuales = destinatariosDeFinca(fA.codigo).filter(e => e !== email);
+  guardarDestinatariosDeFinca(fA.codigo, actuales);
+  renderAdminContent();
+}
+
+
+// ============ CONFIGURACIÓN SUPABASE ============
+const SUPABASE_URL = "https://wocjkxmwhcgdjefygigg.supabase.co";
+const SUPABASE_KEY = "sb_publishable_2Zo3VxKwH2OrWboQNC1bcg_xc7eMrir";
+
+// Helper para hacer peticiones REST a Supabase
+async function supabaseGet(tabla, params = ""){
+  const url = SUPABASE_URL + "/rest/v1/" + tabla + (params ? "?" + params : "");
+  const resp = await fetch(url, {
+    method: "GET",
+    headers: {
+      "apikey": SUPABASE_KEY,
+      "Authorization": "Bearer " + SUPABASE_KEY,
+      "Content-Type": "application/json"
+    }
+  });
+  if(!resp.ok) throw new Error("Supabase GET " + tabla + ": " + resp.status + " " + await resp.text());
+  return resp.json();
+}
+
+async function supabasePost(tabla, filas){
+  const url = SUPABASE_URL + "/rest/v1/" + tabla;
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      "apikey": SUPABASE_KEY,
+      "Authorization": "Bearer " + SUPABASE_KEY,
+      "Content-Type": "application/json",
+      "Prefer": "return=representation"
+    },
+    body: JSON.stringify(Array.isArray(filas) ? filas : [filas])
+  });
+  if(!resp.ok) throw new Error("Supabase POST " + tabla + ": " + resp.status + " " + await resp.text());
+  return resp.json();
+}
+
+// ============ GESTIÓN DE FINCAS ============
+function fincasGuardadas(){
+  try{ return JSON.parse(localStorage.getItem(K_FINCAS) || "[]"); }
+  catch{ return []; }
+}
+function fincaActivaId(){
+  const v = localStorage.getItem(K_FINCA_ACTIVA);
+  return v ? parseInt(v, 10) : null;
+}
+function fincaActiva(){
+  const id = fincaActivaId();
+  if(!id) return null;
+  return fincasGuardadas().find(f => f.id === id) || null;
+}
+function actualizarCabeceraFinca(){
+  const el = document.getElementById("cabFincaLabel");
+  if(!el) return;
+  const f = fincaActiva();
+  el.textContent = f ? f.nombre_completo : "(sin finca configurada)";
+  if(!f) el.style.color = "#c33";
+  else el.style.color = "";
+}
+async function descargarFincasDesdeSupabase(){
+  const fincas = await supabaseGet("fincas", "select=id,codigo,nombre_completo,provincia&order=codigo.asc");
+  localStorage.setItem(K_FINCAS, JSON.stringify(fincas));
+  return fincas;
+}
+
+// ============ INDEXEDDB PARA TILES OFFLINE ============
+const IDB_NAME = "monitoreo.tiles";
+const IDB_STORE = "tiles";
+let idbConn = null;
+
+function idbAbrir(){
+  if(idbConn) return Promise.resolve(idbConn);
+  return new Promise((res, rej) => {
+    const rq = indexedDB.open(IDB_NAME, 1);
+    rq.onupgradeneeded = e => {
+      const db = e.target.result;
+      if(!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+    };
+    rq.onsuccess = e => { idbConn = e.target.result; res(idbConn); };
+    rq.onerror = e => rej(e.target.error);
+  });
+}
+async function idbPut(key, blob){
+  const db = await idbAbrir();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    tx.objectStore(IDB_STORE).put(blob, key);
+    tx.oncomplete = () => res();
+    tx.onerror = e => rej(e.target.error);
+  });
+}
+async function idbGet(key){
+  const db = await idbAbrir();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(IDB_STORE, "readonly");
+    const rq = tx.objectStore(IDB_STORE).get(key);
+    rq.onsuccess = () => res(rq.result || null);
+    rq.onerror = e => rej(e.target.error);
+  });
+}
+async function idbCount(){
+  const db = await idbAbrir();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(IDB_STORE, "readonly");
+    const rq = tx.objectStore(IDB_STORE).count();
+    rq.onsuccess = () => res(rq.result);
+    rq.onerror = e => rej(e.target.error);
+  });
+}
+async function idbClear(){
+  const db = await idbAbrir();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    tx.objectStore(IDB_STORE).clear();
+    tx.oncomplete = () => res();
+    tx.onerror = e => rej(e.target.error);
+  });
+}
+
+function tileKey(z, x, y){ return "pnoa_" + z + "_" + x + "_" + y; }
+function tileURL(z, x, y){
+  return "https://www.ign.es/wmts/pnoa-ma?request=GetTile&service=WMTS&version=1.0.0&Format=image/jpeg&layer=OI.OrthoimageCoverage&style=default&tilematrixset=GoogleMapsCompatible&TileMatrix=" + z + "&TileRow=" + y + "&TileCol=" + x;
+}
+
+// Convierte lat/lon a coordenadas de tile
+function lonLatATile(lon, lat, z){
+  const n = Math.pow(2, z);
+  const x = Math.floor((lon + 180) / 360 * n);
+  const latRad = lat * Math.PI / 180;
+  const y = Math.floor((1 - Math.log(Math.tan(latRad) + 1/Math.cos(latRad)) / Math.PI) / 2 * n);
+  return {x, y};
+}
+
+// Calcula los tiles que cubren un conjunto de polígonos
+function tilesParaPoligonos(poligonos, zoomMin, zoomMax){
+  const set = new Set();
+  const tiles = [];
+  const coords = [];
+  Object.values(poligonos).forEach(poly => poly.forEach(p => coords.push(p)));
+  if(!coords.length) return tiles;
+  const lons = coords.map(c => c[0]);
+  const lats = coords.map(c => c[1]);
+  const xMin = Math.min(...lons), xMax = Math.max(...lons);
+  const yMin = Math.min(...lats), yMax = Math.max(...lats);
+  for(let z = zoomMin; z <= zoomMax; z++){
+    const a = lonLatATile(xMin, yMax, z);
+    const b = lonLatATile(xMax, yMin, z);
+    for(let x = Math.min(a.x, b.x); x <= Math.max(a.x, b.x); x++){
+      for(let y = Math.min(a.y, b.y); y <= Math.max(a.y, b.y); y++){
+        const k = tileKey(z, x, y);
+        if(!set.has(k)){ set.add(k); tiles.push({z, x, y, key: k}); }
+      }
+    }
+  }
+  return tiles;
+}
+
+// TileLayer que mira IndexedDB antes de la red
+function crearCapaTiles(){
+  const capa = L.tileLayer(tileURL(0, 0, 0).replace("=0&TileRow=0&TileCol=0", "={z}&TileRow={y}&TileCol={x}"), {
+    maxZoom: 19,
+    attribution: "© IGN España · PNOA"
+  });
+  // Interceptar carga de tiles para mirar caché primero
+  const origCreateTile = capa.createTile.bind(capa);
+  capa.createTile = function(coords, done){
+    const img = document.createElement("img");
+    img.setAttribute("role", "presentation");
+    img.alt = "";
+    const {z, x, y} = coords;
+    const key = tileKey(z, x, y);
+    idbGet(key).then(blob => {
+      if(blob){
+        img.onload = () => done(null, img);
+        img.onerror = () => { img.src = tileURL(z, x, y); };
+        img.src = URL.createObjectURL(blob);
+      } else {
+        img.onload = () => done(null, img);
+        img.onerror = e => done(e, img);
+        img.src = tileURL(z, x, y);
+      }
+    }).catch(() => {
+      img.src = tileURL(z, x, y);
+      img.onload = () => done(null, img);
+      img.onerror = e => done(e, img);
+    });
+    return img;
+  };
+  return capa;
+}
+
+let PRECARGA = {activa: false, cancelar: false};
+
+// ============ PRECARGA OFFLINE ============
+async function abrirPrecarga(){
+  if(Object.keys(POLIGONOS).length === 0){
+    aviso("Primero carga un mapa de parcelas");
+    return;
+  }
+  const nCache = await idbCount();
+  const html =
+    '<h3>Preparar mapas para offline</h3>'+
+    '<p style="color:#5b6467;font-size:13px;margin:0 0 12px">Descarga las imágenes satélite de tus parcelas para trabajar sin conexión en campo.</p>'+
+    '<label>Nivel de detalle'+
+      '<select id="f-zoom">'+
+        '<option value="17">Detalle medio (más rápido)</option>'+
+        '<option value="18" selected>Detalle alto (recomendado)</option>'+
+        '<option value="19">Máximo detalle (más pesado)</option>'+
+      '</select></label>'+
+    '<div id="prev-tiles" style="font-size:12px;color:#5b6467;margin-bottom:8px">Calculando…</div>'+
+    '<div style="font-size:11px;color:#5b6467;margin-bottom:8px">Ya cacheadas: '+nCache.toLocaleString("es-ES")+' imágenes</div>'+
+    '<div id="progreso-precarga" style="display:none;margin:12px 0;padding:10px;background:#f7f9f8;border-radius:8px">'+
+      '<div id="prog-txt" style="font-size:12px;font-weight:600">Preparando…</div>'+
+      '<div style="height:8px;background:#e0e5e2;border-radius:4px;margin-top:8px;overflow:hidden">'+
+        '<div id="prog-bar" style="height:100%;width:0%;background:#0b6e4f;transition:width .2s"></div>'+
+      '</div>'+
+      '<div id="prog-detalle" style="font-size:11px;color:#5b6467;margin-top:6px"></div>'+
+    '</div>'+
+    '<div class="acc-guardar" id="acc-precarga">'+
+      '<button class="btn btn-s" onclick="cerrar()">Cerrar</button>'+
+      (nCache > 0 ? '<button class="btn btn-s" onclick="vaciarCachePrecarga()">Vaciar caché</button>' : '')+
+      '<button class="btn btn-guardar" id="btn-precarga" onclick="lanzarPrecarga()">Descargar</button>'+
+    '</div>';
+  document.getElementById("hoja").innerHTML = html;
+  document.getElementById("velo").classList.add("on");
+  document.getElementById("f-zoom").onchange = calcularTiles;
+  setTimeout(calcularTiles, 50);
+}
+
+function calcularTiles(){
+  const s = document.getElementById("f-zoom");
+  if(!s) return;
+  const zMax = parseInt(s.value, 10);
+  const tiles = tilesParaPoligonos(POLIGONOS, 15, zMax);
+  const mbAprox = (tiles.length * 40 / 1024).toFixed(1);
+  const p = document.getElementById("prev-tiles");
+  if(p){
+    p.textContent = "Se descargarán aproximadamente "+tiles.length.toLocaleString("es-ES")+" imágenes (~"+mbAprox+" MB)";
+  }
+}
+
+async function lanzarPrecarga(){
+  if(PRECARGA.activa) return;
+  const zoomMax = parseInt(document.getElementById("f-zoom").value, 10);
+  const tiles = tilesParaPoligonos(POLIGONOS, 15, zoomMax);
+  if(!tiles.length){ aviso("No hay tiles que descargar"); return; }
+
+  document.getElementById("acc-precarga").innerHTML =
+    '<button class="btn btn-s" onclick="cancelarPrecarga()">Detener</button>';
+  document.getElementById("progreso-precarga").style.display = "block";
+
+  PRECARGA.activa = true;
+  PRECARGA.cancelar = false;
+
+  const bar = document.getElementById("prog-bar");
+  const txt = document.getElementById("prog-txt");
+  const det = document.getElementById("prog-detalle");
+
+  let hechos = 0, saltados = 0, errores = 0;
+  const total = tiles.length;
+  const inicio = Date.now();
+
+  // Descargar en tandas de 6 en paralelo (para no saturar)
+  const CONCURRENCIA = 6;
+  let cursor = 0;
+
+  async function descargarUno(t){
+    // Si ya está en caché, saltamos
+    try{
+      const yaHay = await idbGet(t.key);
+      if(yaHay){ saltados++; return; }
+    }catch(e){}
+    try{
+      const resp = await fetch(tileURL(t.z, t.x, t.y));
+      if(!resp.ok){ errores++; return; }
+      const blob = await resp.blob();
+      await idbPut(t.key, blob);
+      hechos++;
+    }catch(e){
+      errores++;
+    }
+  }
+
+  async function worker(){
+    while(!PRECARGA.cancelar && cursor < total){
+      const idx = cursor++;
+      await descargarUno(tiles[idx]);
+      const procesado = hechos + saltados + errores;
+      const pct = Math.round(procesado / total * 100);
+      bar.style.width = pct + "%";
+      const seg = Math.round((Date.now() - inicio) / 1000);
+      const eta = procesado > 0 ? Math.round((seg / procesado) * (total - procesado)) : 0;
+      txt.textContent = procesado + " / " + total + " (" + pct + "%)";
+      det.textContent = hechos + " descargados · " + saltados + " ya cacheados · " + errores + " errores · ETA " + eta + "s";
+    }
+  }
+
+  const workers = [];
+  for(let i = 0; i < CONCURRENCIA; i++) workers.push(worker());
+  await Promise.all(workers);
+
+  PRECARGA.activa = false;
+
+  if(PRECARGA.cancelar){
+    aviso("Precarga detenida. Se guardó lo descargado.");
+  } else {
+    aviso("Precarga completa. " + hechos + " imágenes nuevas guardadas.");
+  }
+  document.getElementById("acc-precarga").innerHTML =
+    '<button class="btn btn-guardar" onclick="cerrar()">Listo</button>';
+}
+
+function cancelarPrecarga(){
+  PRECARGA.cancelar = true;
+  aviso("Deteniendo…");
+}
+
+async function vaciarCachePrecarga(){
+  if(!confirm("¿Borrar las imágenes offline guardadas? Tendrás que volver a descargarlas.")) return;
+  try{
+    await idbClear();
+    aviso("Caché offline vaciada");
+    cerrar();
+    if(S.admin) renderAdminContent();
+  }catch(e){ aviso("Error borrando caché"); }
+}
+
+let S = {
+  parcela:null, sacActual:null, gps:null, admin:false, ultimaSac:null,
+  parcelaDetectada:null, muestreoActivo:null, razonSel:null, gpsWatchId:null
+};
+let POLIGONOS = {};
+let MAPA = {mini:null, grande:null, capaPoli:null, capaGPS:null, puntos:null,
+            gCapaTiles:null, gCapaParcelas:null, gCapaPuntos:null, gCapaGPS:null};
+let deshacerTimer = null;
+
+// ============ INIT ============
+function init(){
+  document.getElementById("fecha").textContent = new Date().toLocaleDateString("es-ES",{weekday:"long",day:"2-digit",month:"long"});
+  cargarCatalogoDesdeStorage();  // hidrata CATALOGO desde localStorage (o vacío)
+  limpiarMuestreosHuerfanos();
+  purgarMuestreosAntiguos();
+  cargarPoligonos();
+  iniciarSacudida();
+  actualizarCabeceraFinca();
+  render();
+}
+
+function limpiarMuestreosHuerfanos(){
+  // Elimina muestreos que se crearon pero nunca tuvieron ninguna sacudida
+  const ms = muestreos();
+  const validos = ms.filter(m => sacudidasDeMuestreo(m.id).length > 0);
+  if(validos.length !== ms.length){
+    guardarMuestreos(validos);
+  }
+}
+
+function cargarPoligonos(){
+  try{
+    const d = localStorage.getItem(K_POLIGONOS);
+    if(d) POLIGONOS = JSON.parse(d);
+  }catch(e){ POLIGONOS = {}; }
+}
+
+function render(){
+  renderSelectParcela();
+  renderPlagas();
+  renderListaParcelas();
+  actualizarPie();
+  actualizarProgreso();
+}
+
+function renderSelectParcela(){
+  const s = document.getElementById("sel");
+  const val = s.value;
+  s.innerHTML = '<option value="">- Elige parcela -</option>';
+  const codigos = Object.keys(POLIGONOS).sort();
+  if(codigos.length === 0){
+    const o = document.createElement("option");
+    o.value = "";
+    o.textContent = "(Ninguna parcela cargada. Ve a admin)";
+    o.disabled = true;
+    s.appendChild(o);
+  }
+  codigos.forEach(cod => {
+    const o = document.createElement("option");
+    o.value = cod;
+    o.textContent = cod;
+    s.appendChild(o);
+  });
+  if(val) s.value = val;
+}
+
+function cambParc(){
+  const s = document.getElementById("sel");
+  S.parcela = s.value || null;
+  if(!S.parcela){
+    S.muestreoActivo = null;
+    document.getElementById("cont-sac").style.display = "none";
+    document.getElementById("cont-plagas").style.display = "none";
+    document.getElementById("finalizada-aviso").style.display = "none";
+    actualizarProgreso();
+    actualizarPie();
+    return;
+  }
+
+  const ultimo = muestreoActivoDe(S.parcela);
+  const hoy = new Date().toISOString().slice(0, 10);
+
+  if(!ultimo){
+    // Nunca se ha muestreado esta parcela → nada que hacer, sacudidas empezará muestreo al guardar
+    S.muestreoActivo = null;
+  } else if(ultimo.status === "finalizado"){
+    // Último muestreo finalizado (hoy o antes) → arrancar uno nuevo automáticamente
+    S.muestreoActivo = null;
+  } else if(ultimo.status === "en_curso"){
+    const iniDia = (ultimo.fecha_inicio || "").slice(0, 10);
+    if(iniDia === hoy){
+      // Muestreo abierto hoy → continuar sin preguntar
+      S.muestreoActivo = ultimo;
+    } else {
+      // Muestreo abierto de días anteriores → preguntar
+      const fechaTxt = new Date(ultimo.fecha_inicio).toLocaleDateString("es-ES",{day:"2-digit",month:"2-digit"});
+      const seguir = confirm("Tienes un muestreo abierto en " + S.parcela + " desde el " + fechaTxt + " con " + ultimo.sacudidas_count + " sacudidas.\n\nAceptar = continuar ese muestreo\nCancelar = empezar uno nuevo");
+      if(seguir){
+        S.muestreoActivo = ultimo;
+      } else {
+        // Cerrar el antiguo con razón automática y arrancar nuevo al guardar
+        const ms = muestreos();
+        const idx = ms.findIndex(m => m.id === ultimo.id);
+        if(idx >= 0){
+          ms[idx].status = "finalizado";
+          ms[idx].fecha_fin = new Date().toISOString();
+          ms[idx].razon_finalizacion = "Cerrado automáticamente al abrir muestreo nuevo";
+          guardarMuestreos(ms);
+        }
+        S.muestreoActivo = null;
+      }
+    }
+  }
+
+  document.getElementById("cont-sac").style.display = "block";
+  document.getElementById("cont-plagas").style.display = "block";
+  document.getElementById("finalizada-aviso").style.display = "none";
+  actualizarProgreso();
+  pintarMini();
+  actualizarPie();
+  iniciarSacudida();
+  chequearParcelaGPS();
+}
+
+// ============ MUESTREOS ============
+function muestreos(){
+  try{ return JSON.parse(localStorage.getItem(K_MUESTREOS) || "[]"); }
+  catch(e){ return []; }
+}
+
+// Muestreos NO archivados (los que ve el plaguero)
+function muestreosActivos(){
+  // activos = ni archivados ni pendientes de envío (siguen "en curso" en la parcela)
+  return muestreos().filter(m => !m.archivado && !m.pendiente_envio);
+}
+
+function guardarMuestreos(lista){
+  localStorage.setItem(K_MUESTREOS, JSON.stringify(lista));
+}
+
+// ============ FINALIZAR JORNADA (v24e: solo cierra, no envía) ============
+function finalizarJornada(){
+  const activos = muestreosActivos();
+  if(activos.length === 0){
+    aviso("No hay muestreos que finalizar");
+    return;
+  }
+
+  const enCurso = activos.filter(m => m.status !== "finalizado");
+  const finalizados = activos.filter(m => m.status === "finalizado");
+
+  let msg = "Vas a finalizar la jornada.\n\nSe cerrarán:\n";
+  if(enCurso.length) msg += "• " + enCurso.length + " muestreo(s) en curso → se cerrarán y pasarán a 'Pendientes de enviar'\n";
+  if(finalizados.length) msg += "• " + finalizados.length + " muestreo(s) ya finalizado(s) → pasarán a 'Pendientes de enviar'\n";
+  msg += "\nDespués podrás enviarlos al servidor desde la sección 'Pendientes'.\n\n¿Continuar?";
+
+  if(!confirm(msg)) return;
+
+  const ahora = new Date().toISOString();
+  const plaguero = localStorage.getItem(K_PLAGUERO) || "";
+  const ms = muestreos();
+  const idsActivos = new Set(activos.map(m => m.id));
+
+  ms.forEach(m => {
+    if(idsActivos.has(m.id)){
+      if(m.status !== "finalizado"){
+        m.status = "finalizado";
+        m.fecha_fin = ahora;
+        m.razon_finalizacion = "Cerrado sin finalizar en cierre de jornada";
+      }
+      // marcar como pendiente de envío (NO como archivado)
+      m.pendiente_envio = true;
+      m.fecha_cierre_jornada = ahora;
+      m.archivado_por = plaguero;
+    }
+  });
+
+  guardarMuestreos(ms);
+  S.muestreoActivo = null;
+  render();
+  aviso("✓ Jornada cerrada · " + activos.length + " muestreo(s) pendiente(s) de enviar");
+}
+
+// ============ v24e: ENVIAR PENDIENTES AL SERVIDOR ============
+function muestreosPendientesEnvio(){
+  return muestreos().filter(m => m.pendiente_envio && !m.sincronizado_en);
+}
+
+async function enviarPendientes(){
+  const pendientes = muestreosPendientesEnvio();
+  if(pendientes.length === 0){
+    aviso("No hay muestreos pendientes de enviar");
+    return;
+  }
+  if(!navigator.onLine){
+    aviso("Sin conexión. Espera a tener wifi o datos móviles.");
+    return;
+  }
+  const fA = fincaActiva();
+  if(!fA){
+    aviso("Configura una finca activa en Admin antes de enviar");
+    return;
+  }
+  mostrarSincronizacion(pendientes);
+}
+
+// ============ v24: SINCRONIZACIÓN CON SUPABASE ============
+async function mostrarSincronizacion(muestreosASubir){
+  // Crear/reutilizar div overlay de estado de sincronización
+  let overlay = document.getElementById("sync-overlay");
+  if(!overlay){
+    overlay = document.createElement("div");
+    overlay.id = "sync-overlay";
+    overlay.style.cssText = "position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#fff;border:2px solid #0b6e4f;border-radius:10px;padding:14px 20px;box-shadow:0 4px 14px rgba(0,0,0,0.2);z-index:9999;min-width:280px;max-width:90%;text-align:center;font-size:14px";
+    document.body.appendChild(overlay);
+  }
+  overlay.style.display = "block";
+  overlay.innerHTML = '<div style="color:#0b6e4f;font-weight:700">⟳ Sincronizando ' + muestreosASubir.length + ' muestreo(s)...</div>';
+
+  const resultados = { ok: 0, fallo: 0, errores: [] };
+  for(const m of muestreosASubir){
+    try{
+      await sincronizarMuestreo(m);
+      resultados.ok++;
+    } catch(err){
+      resultados.fallo++;
+      resultados.errores.push(m.parcela + ": " + err.message);
+      console.error("Error sincronizando " + m.id, err);
+    }
+  }
+
+  // Mostrar resultado final
+  if(resultados.fallo === 0){
+    // guardar IDs subidos para acciones posteriores
+    _ultimosSyncOK = muestreosASubir.map(m => m.id);
+    const fA = fincaActiva();
+    const dests = fA ? destinatariosDeFinca(fA.codigo) : [];
+    // FASE 1 — solo ofrecer descarga (no correo aún)
+    let acciones = '<div style="margin-top:12px;display:flex;gap:6px;justify-content:center;flex-wrap:wrap">';
+    acciones += '<button onclick="descargarPDFsSincronizados()" style="background:#0b6e4f;color:#fff;border:none;padding:10px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">📄 Descargar PDF(s)</button>';
+    acciones += '<button onclick="cerrarSyncOverlay()" style="background:#eee;color:#333;border:none;padding:10px 14px;border-radius:6px;cursor:pointer;font-size:12px">Cerrar</button>';
+    acciones += '</div>';
+    // Info de destinatarios (para que sepa que después podrá enviar)
+    let infoDests = '';
+    if(dests.length > 0){
+      infoDests = '<div style="color:#5b6467;font-size:11px;margin-top:6px;line-height:1.4">Tras descargar, podrás enviarlos por correo a:<br><b style="color:#0b6e4f">'+dests.join(", ")+'</b></div>';
+    } else if(fA){
+      infoDests = '<div style="color:#b8771a;font-size:11px;margin-top:6px;font-style:italic">Configura destinatarios en Admin para enviar por correo</div>';
+    }
+    overlay.innerHTML = '<div style="color:#0b6e4f;font-weight:700;font-size:15px">✓ Enviados ' + resultados.ok + ' muestreo(s) al servidor</div>'+
+      '<div style="color:#5b6467;font-size:12px;margin-top:4px">Datos guardados en servidor central</div>'+
+      infoDests + acciones;
+    // NO auto-cerrar
+  } else {
+    overlay.innerHTML = '<div style="color:#b3261e;font-weight:700;font-size:15px">✗ Envío con errores</div>'+
+      '<div style="color:#5b6467;font-size:12px;margin-top:4px">'+
+        resultados.ok + ' subido(s) OK · ' + resultados.fallo + ' fallaron<br>'+
+        '<span style="font-size:11px">' + resultados.errores.slice(0,2).join("; ") + '</span>'+
+      '</div>'+
+      '<div style="margin-top:10px;display:flex;gap:6px;justify-content:center">'+
+        '<button onclick="enviarPendientes()" style="background:#0b6e4f;color:#fff;border:none;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px">Reintentar</button>'+
+        '<button onclick="cerrarSyncOverlay()" style="background:#eee;color:#333;border:none;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px">Cerrar</button>'+
+      '</div>';
+  }
+  // refrescar pantalla actual
+  renderListaParcelas();
+  renderRecientes();
+}
+
+// acciones sobre los últimos muestreos sincronizados
+let _ultimosSyncOK = [];
+
+function descargarPDFsSincronizados(){
+  if(_ultimosSyncOK.length === 0){ aviso("Nada que descargar"); return; }
+  const todos = muestreos();
+  _ultimosSyncOK.forEach(id => {
+    const m = todos.find(x => x.id === id);
+    if(m) generarPDFMuestreo(m.id);
+  });
+  // transformar overlay a FASE 2 con opción de correo
+  const overlay = document.getElementById("sync-overlay");
+  if(!overlay){ aviso("✓ " + _ultimosSyncOK.length + " PDF(s) descargado(s)"); return; }
+  const fA = fincaActiva();
+  const dests = fA ? destinatariosDeFinca(fA.codigo) : [];
+  let acciones = '<div style="margin-top:12px;display:flex;gap:6px;justify-content:center;flex-wrap:wrap">';
+  if(dests.length > 0){
+    acciones += '<button onclick="enviarPDFsPorCorreo()" style="background:#0b6e4f;color:#fff;border:none;padding:10px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">📧 Abrir correo con destinatarios</button>';
+  }
+  acciones += '<button onclick="cerrarSyncOverlay()" style="background:#eee;color:#333;border:none;padding:10px 14px;border-radius:6px;cursor:pointer;font-size:12px">Cerrar</button>';
+  acciones += '</div>';
+  let infoDests = '';
+  if(dests.length === 0){
+    infoDests = '<div style="color:#b8771a;font-size:11px;margin-top:6px;font-style:italic">Sin destinatarios configurados en Admin — solo puedes cerrar</div>';
+  } else {
+    infoDests = '<div style="color:#5b6467;font-size:11px;margin-top:6px;line-height:1.4">Los PDF(s) ya están en tus descargas.<br>Al abrir el correo, adjúntalos manualmente:<br><b style="color:#0b6e4f">'+dests.join(", ")+'</b></div>';
+  }
+  overlay.innerHTML = '<div style="color:#0b6e4f;font-weight:700;font-size:15px">✓ ' + _ultimosSyncOK.length + ' PDF(s) descargados</div>'+
+    infoDests + acciones;
+}
+
+function enviarPDFsPorCorreo(){
+  // YA NO descarga PDFs — asume que se descargaron antes (fase 1)
+  if(_ultimosSyncOK.length === 0){ aviso("Nada que enviar"); return; }
+  const fA = fincaActiva();
+  if(!fA){ aviso("Sin finca activa"); return; }
+  const dests = destinatariosDeFinca(fA.codigo);
+  if(dests.length === 0){ aviso("Configura destinatarios en Admin"); return; }
+  const todos = muestreos();
+  const ms = _ultimosSyncOK.map(id => todos.find(x => x.id === id)).filter(m => m);
+  if(ms.length === 0){ aviso("No se encontraron los muestreos"); return; }
+  // Construir asunto y cuerpo
+  const fecha = new Date().toLocaleDateString("es-ES",{day:"2-digit",month:"2-digit",year:"numeric"});
+  const parcelas = ms.map(m => m.parcela).join(", ");
+  const asunto = "Partes de muestreo " + fA.codigo + " · " + fecha;
+  let cuerpo = "Adjuntamos parte(s) de muestreo de la jornada.\n\n";
+  cuerpo += "Finca: " + fA.nombre_completo + " (" + fA.codigo + ")\n";
+  cuerpo += "Fecha: " + fecha + "\n";
+  cuerpo += "Parcelas: " + parcelas + "\n";
+  cuerpo += "Nº de muestreos: " + ms.length + "\n\n";
+  ms.forEach(m => {
+    const sacs = sacudidasDeMuestreo(m.id);
+    const cCon = sacs.filter(s => !s.sin_capturas && tieneCapturas(s)).length;
+    cuerpo += "• " + m.parcela + ": " + sacs.length + " sacudidas, " + cCon + " con capturas\n";
+  });
+  cuerpo += "\n---\n";
+  cuerpo += "IMPORTANTE: los archivos PDF están en la carpeta de descargas de este dispositivo. Adjúntalos manualmente a este correo antes de enviar.\n";
+  cuerpo += "\nGenerado automáticamente por Monitoreo de plagas.";
+  // Abrir cliente de correo
+  const mailto = "mailto:" + dests.join(",") +
+    "?subject=" + encodeURIComponent(asunto) +
+    "&body=" + encodeURIComponent(cuerpo);
+  window.location.href = mailto;
+  setTimeout(() => {
+    aviso("📧 Correo abierto. Adjunta los " + ms.length + " PDF(s) desde tus descargas.");
+  }, 500);
+}
+
+function cerrarSyncOverlay(){
+  const o = document.getElementById("sync-overlay");
+  if(o) o.style.display = "none";
+}
+
+async function reintentarSincronizacion(){
+  // Buscar todos los muestreos archivados sin sincronizar
+  const todos = muestreos();
+  const pendientes = todos.filter(m => m.archivado && !m.sincronizado_en);
+  if(pendientes.length === 0){
+    aviso("No hay muestreos pendientes");
+    cerrarSyncOverlay();
+    return;
+  }
+  await mostrarSincronizacion(pendientes);
+}
+
+async function sincronizarMuestreo(m){
+  const fA = fincaActiva();
+  if(!fA) throw new Error("Sin finca activa");
+
+  // 1. Crear el muestreo en Supabase
+  const plagueroLS = localStorage.getItem(K_PLAGUERO) || "";
+  const filaMuestreo = {
+    finca: fA.codigo,
+    parcela: m.parcela,
+    plaguero: m.plaguero || plagueroLS || "",
+    fecha_inicio: m.fecha_inicio,
+    fecha_fin: m.fecha_fin || null,
+    status: m.status || "finalizado",
+    razon_finalizacion: m.razon_finalizacion || null
+  };
+  const resM = await supabasePost("muestreos", filaMuestreo);
+  if(!resM || !resM[0] || !resM[0].id) throw new Error("Respuesta inválida al crear muestreo");
+  const supabaseMuestreoId = resM[0].id;
+
+  // 2. Crear todas las sacudidas del muestreo
+  const sacs = sacudidasDeMuestreo(m.id);
+  const filasSac = sacs.map(s => ({
+    muestreo_id: supabaseMuestreoId,
+    numero: s.numero,
+    fecha: s.fecha,
+    gps_lat: s.lat || null,
+    gps_lon: s.lon || null,
+    gps_precision: s.precision || null,
+    sin_capturas: s.sin_capturas === true || !tieneCapturas(s),
+    nota: s.nota || null
+  }));
+
+  let supabaseSacIds = [];
+  if(filasSac.length > 0){
+    const resSacs = await supabasePost("sacudidas", filasSac);
+    // Ordenamos por numero para asegurar mapeo correcto
+    resSacs.sort((a,b) => a.numero - b.numero);
+    supabaseSacIds = resSacs.map(s => ({numero: s.numero, id: s.id}));
+  }
+
+  // 3. Crear capturas — una fila por cada plaga+subtipo con cantidad>0
+  const filasCap = [];
+  sacs.forEach(s => {
+    const supSac = supabaseSacIds.find(x => x.numero === s.numero);
+    if(!supSac) return;
+    if(!s.plagas) return;
+    Object.entries(s.plagas).forEach(([cod, v]) => {
+      if(v == null) return;
+      const plagaDef = CATALOGO.find(x => x.cod === cod);
+      const plagaId = getPlagaId(cod);
+      if(!plagaId) return; // catálogo desactualizado
+      if(typeof v === "object"){
+        Object.entries(v).forEach(([subCod, subN]) => {
+          if(subN > 0){
+            const subId = getSubtipoId(cod, subCod);
+            filasCap.push({
+              sacudida_id: supSac.id,
+              plaga_id: plagaId,
+              subtipo_id: subId,
+              cantidad: subN
+            });
+          }
+        });
+      } else if(v > 0){
+        filasCap.push({
+          sacudida_id: supSac.id,
+          plaga_id: plagaId,
+          subtipo_id: null,
+          cantidad: v
+        });
+      }
+    });
+  });
+
+  if(filasCap.length > 0){
+    await supabasePost("capturas", filasCap);
+  }
+
+  // 4. Marcar el muestreo como sincronizado localmente + moverlo a Recientes
+  const todos = muestreos();
+  const target = todos.find(x => x.id === m.id);
+  if(target){
+    target.sincronizado_en = new Date().toISOString();
+    target.sincronizado_supabase_id = supabaseMuestreoId;
+    // sale de "Pendientes de enviar" y entra en "Recientes" (archivado)
+    target.pendiente_envio = false;
+    target.archivado = true;
+    target.fecha_archivo = target.fecha_archivo || new Date().toISOString();
+    guardarMuestreos(todos);
+  }
+}
+
+// Helper: mapea código de plaga (ARANA) al ID Supabase de catalogo_plagas
+// Se cachea en memoria tras primera consulta
+let _plagasIdMap = null;
+let _subtiposIdMap = null;
+
+async function refrescarMapasCatalogo(){
+  const [plagas, subtipos] = await Promise.all([
+    supabaseGet("catalogo_plagas", "select=id,codigo"),
+    supabaseGet("catalogo_subtipos", "select=id,codigo,plaga_id")
+  ]);
+  _plagasIdMap = {};
+  plagas.forEach(p => { _plagasIdMap[p.codigo] = p.id; });
+  _subtiposIdMap = {};
+  subtipos.forEach(s => {
+    const plaga = plagas.find(p => p.id === s.plaga_id);
+    if(plaga){
+      _subtiposIdMap[plaga.codigo + "|" + s.codigo] = s.id;
+    }
+  });
+  localStorage.setItem("monitoreo.plagas_map", JSON.stringify(_plagasIdMap));
+  localStorage.setItem("monitoreo.subtipos_map", JSON.stringify(_subtiposIdMap));
+}
+
+function getPlagaId(cod){
+  if(!_plagasIdMap){
+    try{ _plagasIdMap = JSON.parse(localStorage.getItem("monitoreo.plagas_map") || "null"); } catch{}
+  }
+  return _plagasIdMap ? _plagasIdMap[cod] : null;
+}
+
+function getSubtipoId(plagaCod, subCod){
+  if(!subCod) return null;
+  if(!_subtiposIdMap){
+    try{ _subtiposIdMap = JSON.parse(localStorage.getItem("monitoreo.subtipos_map") || "null"); } catch{}
+  }
+  return _subtiposIdMap ? _subtiposIdMap[plagaCod + "|" + subCod] : null;
+}
+
+function muestreoActivoDe(parcela){
+  // El "activo" es el último muestreo NO ARCHIVADO de esa parcela (en curso o finalizado)
+  const ms = muestreosActivos().filter(m => m.parcela === parcela);
+  if(!ms.length) return null;
+  ms.sort((a,b) => (b.fecha_inicio || "").localeCompare(a.fecha_inicio || ""));
+  const m = ms[0];
+  m.sacudidas_count = sacudidasDeMuestreo(m.id).length;
+  return m;
+}
+
+function crearMuestreo(parcela){
+  const nuevo = {
+    id: "M"+Date.now(),
+    parcela: parcela,
+    plaguero: localStorage.getItem(K_PLAGUERO) || "",
+    fecha_inicio: new Date().toISOString(),
+    fecha_fin: null,
+    status: "en_curso",
+    razon_finalizacion: "",
+    sacudidas_count: 0
+  };
+  const ms = muestreos();
+  ms.push(nuevo);
+  guardarMuestreos(ms);
+  return nuevo;
+}
+
+function actualizarBannerFinalizada(){
+  const banner = document.getElementById("finalizada-aviso");
+  const txt = document.getElementById("fin-aviso-txt");
+  if(!banner || !txt) return;
+  if(S.muestreoActivo && S.muestreoActivo.status === "finalizado"){
+    const razon = S.muestreoActivo.razon_finalizacion || "sin razón";
+    txt.textContent = "Muestreo finalizado (" + razon + "). " + S.muestreoActivo.sacudidas_count + " sacudidas.";
+    banner.style.display = "block";
+  } else {
+    banner.style.display = "none";
+  }
+}
+
+function reabrirMuestreo(){
+  if(!S.muestreoActivo) return;
+  if(!confirm("¿Reabrir este muestreo para añadir más sacudidas?")) return;
+  const ms = muestreos();
+  const idx = ms.findIndex(m => m.id === S.muestreoActivo.id);
+  if(idx < 0) return;
+  ms[idx].status = "en_curso";
+  ms[idx].fecha_fin = null;
+  ms[idx].razon_finalizacion = "";
+  guardarMuestreos(ms);
+  S.muestreoActivo = ms[idx];
+  render();
+  cambParc();
+  aviso("Muestreo reabierto");
+}
+
+function reabrirDesdeResumen(muestreoId){
+  const ms = muestreos();
+  const idx = ms.findIndex(m => m.id === muestreoId);
+  if(idx < 0) return;
+  if(!confirm("¿Reabrir este muestreo de " + ms[idx].parcela + "?\n\nQuedará abierto para añadir más sacudidas.")) return;
+  ms[idx].status = "en_curso";
+  ms[idx].fecha_fin = null;
+  ms[idx].razon_finalizacion = "";
+  guardarMuestreos(ms);
+  // Preseleccionar la parcela y saltar a Sacudir con el muestreo cargado
+  const parcela = ms[idx].parcela;
+  S.parcela = parcela;
+  S.muestreoActivo = ms[idx];
+  document.getElementById("sel").value = parcela;
+  document.getElementById("cont-sac").style.display = "block";
+  document.getElementById("cont-plagas").style.display = "block";
+  document.getElementById("finalizada-aviso").style.display = "none";
+  iniciarSacudida();
+  render();
+  ir("sac");
+  setTimeout(() => { pintarMini(); chequearParcelaGPS(); }, 100);
+  aviso("Muestreo reabierto. Puedes seguir sacudiendo.");
+}
+
+function empezarNuevoMuestreo(){
+  if(!S.parcela) return;
+  if(!confirm("¿Empezar un muestreo NUEVO en " + S.parcela + "?\n\nEl anterior queda como estaba (finalizado) y este empieza desde cero.")) return;
+  const nuevo = crearMuestreo(S.parcela);
+  S.muestreoActivo = nuevo;
+  render();
+  cambParc();
+  aviso("Nuevo muestreo iniciado");
+}
+
+function finalizarParcela(){
+  if(!S.parcela || !S.muestreoActivo){ aviso("No hay muestreo activo"); return; }
+  S.razonSel = "Muestreo completo";
+  const nSac = S.muestreoActivo.sacudidas_count;
+  let html = '<h3>Finalizar ' + S.parcela + '</h3>';
+  html += '<p style="color:#5b6467;font-size:13px;margin:0 0 12px">' + nSac + ' sacudidas registradas. ¿Motivo?</p>';
+  html += '<div class="razones-grid">';
+  RAZONES_FIN.forEach(r => {
+    const sel = (r === S.razonSel) ? " sel" : "";
+    html += '<div class="razon-op' + sel + '" data-razon="' + r + '">' + r + '</div>';
+  });
+  html += '</div>';
+  html += '<label style="margin-top:12px">Comentario adicional (opcional)<input type="text" id="fin-comentario" placeholder=""></label>';
+  html += '<div class="acc-guardar"><button class="btn btn-s" onclick="cerrar()">Cancelar</button>';
+  html += '<button class="btn btn-guardar" onclick="confirmarFinalizacion()">Finalizar</button></div>';
+  document.getElementById("hoja").innerHTML = html;
+  document.getElementById("velo").classList.add("on");
+  document.querySelectorAll(".razon-op").forEach(el => {
+    el.onclick = () => {
+      document.querySelectorAll(".razon-op").forEach(x => x.classList.remove("sel"));
+      el.classList.add("sel");
+      S.razonSel = el.dataset.razon;
+    };
+  });
+}
+
+function confirmarFinalizacion(){
+  const coment = document.getElementById("fin-comentario").value.trim();
+  const razon = S.razonSel + (coment ? " — " + coment : "");
+  const ms = muestreos();
+  const idx = ms.findIndex(m => m.id === S.muestreoActivo.id);
+  if(idx < 0) return;
+  ms[idx].status = "finalizado";
+  ms[idx].fecha_fin = new Date().toISOString();
+  ms[idx].razon_finalizacion = razon;
+  guardarMuestreos(ms);
+  const nombreParcela = S.parcela;
+  cerrar();
+  // Limpiar selección para volver a la pantalla neutra
+  S.muestreoActivo = null;
+  S.parcela = null;
+  document.getElementById("sel").value = "";
+  document.getElementById("cont-sac").style.display = "none";
+  document.getElementById("cont-plagas").style.display = "none";
+  document.getElementById("finalizada-aviso").style.display = "none";
+  iniciarSacudida();
+  render();
+  aviso("Parcela " + nombreParcela + " finalizada");
+}
+
+// ============ HELPERS DE PLAGAS (soporta plano y con subtipos) ============
+// cantidad total de una plaga en una sacudida (suma subtipos si los tiene)
+function cantSacudida(sac, cod){
+  if(!sac || !sac.plagas) return 0;
+  const v = sac.plagas[cod];
+  if(v == null) return 0;
+  if(typeof v === "object") return Object.values(v).reduce((a,b) => a + (b||0), 0);
+  return v || 0;
+}
+
+// suma total de capturas de una sacudida (todas las plagas)
+function totalCapturasEn(sac){
+  if(!sac || !sac.plagas) return 0;
+  return Object.keys(sac.plagas).reduce((total, cod) => total + cantSacudida(sac, cod), 0);
+}
+
+// sacudida tiene capturas
+function tieneCapturas(sac){
+  if(!sac) return false;
+  if(sac.sin_capturas) return false;
+  return totalCapturasEn(sac) > 0;
+}
+
+// cantidad de un subtipo específico de una plaga
+function cantSubtipo(sac, cod, subCod){
+  if(!sac || !sac.plagas) return 0;
+  const v = sac.plagas[cod];
+  if(v == null || typeof v !== "object") return 0;
+  return v[subCod] || 0;
+}
+
+// ============ SACUDIDA EN CURSO ============
+function iniciarSacudida(){
+  S.sacActual = {};
+  CATALOGO.forEach(p => {
+    if(p.subs){
+      // Plaga con subtipos: {SUB1:0, SUB2:0, ...}
+      const obj = {};
+      p.subs.forEach(s => obj[s.cod] = 0);
+      S.sacActual[p.cod] = obj;
+    } else {
+      S.sacActual[p.cod] = 0;
+    }
+  });
+  const notaEl = document.getElementById("nota");
+  if(notaEl) notaEl.value = "";
+  const notaWrap = document.getElementById("nota-wrap");
+  if(notaWrap) notaWrap.open = false;
+  renderPlagas();
+}
+
+// Helper: obtiene total de una plaga (suma subtipos si los tiene)
+function totalPlaga(cod){
+  const v = S.sacActual ? S.sacActual[cod] : null;
+  if(v == null) return 0;
+  if(typeof v === "object"){
+    return Object.values(v).reduce((a,b) => a + (b||0), 0);
+  }
+  return v || 0;
+}
+
+// Helper: total de todas las capturas de la sacudida actual
+function totalCapturasSacudida(){
+  return CATALOGO.reduce((total, p) => total + totalPlaga(p.cod), 0);
+}
+
+function renderPlagas(){
+  const c = document.getElementById("plagas");
+  if(!c) return;
+  c.innerHTML = "";
+  // aviso bloqueante si no hay catálogo descargado
+  if(!CATALOGO || CATALOGO.length === 0){
+    c.innerHTML = '<div style="grid-column:1/-1;background:#fdecea;border:2px solid #c33;border-radius:10px;padding:16px;text-align:center">'+
+      '<div style="font-size:15px;font-weight:700;color:#c33;margin-bottom:8px">⚠ Sin catálogo de plagas</div>'+
+      '<div style="font-size:12px;color:#5b6467;margin-bottom:12px">No se puede muestrear sin el catálogo. Ve a Admin y pulsa <b>"Actualizar catálogos"</b> (necesita conexión wifi o datos móviles la primera vez).</div>'+
+      '<button class="btn btn-guardar" style="width:100%;padding:12px" onclick="ir(\'admin\')">Ir a Admin</button>'+
+    '</div>';
+    return;
+  }
+  CATALOGO.forEach(p => {
+    const div = document.createElement("div");
+    const n = totalPlaga(p.cod);
+    div.className = "plaga" + (n>0 ? " tocado" : "");
+    const btnQuitar = n>0 ? '<button class="quitar">−</button>' : "";
+    div.innerHTML = btnQuitar + '<div class="n">'+p.n+'</div><div class="c">'+n+'</div>';
+    div.onclick = () => {
+      if(!S.parcela){ aviso("Elige parcela primero"); return; }
+      if(p.subs){
+        // Con subtipos → abrir modal
+        abrirModalSubtipos(p);
+      } else {
+        // Sin subtipos → suma 1 directo
+        S.sacActual[p.cod] = (S.sacActual[p.cod]||0) + 1;
+        renderPlagas();
+      }
+    };
+    c.appendChild(div);
+    const bq = div.querySelector(".quitar");
+    if(bq){
+      bq.onclick = (ev) => {
+        ev.stopPropagation();
+        if(p.subs){
+          // Con subtipos: abrir modal (para ajustar exactamente)
+          abrirModalSubtipos(p);
+        } else if(S.sacActual[p.cod] > 0){
+          S.sacActual[p.cod]--;
+          renderPlagas();
+        }
+      };
+    }
+  });
+}
+
+// ============ MODAL DE SUBTIPOS ============
+function abrirModalSubtipos(plaga){
+  const cur = S.sacActual[plaga.cod] || {};
+  // Copia editable
+  const temp = {};
+  plaga.subs.forEach(s => temp[s.cod] = cur[s.cod] || 0);
+
+  let html = '<h3 style="margin:0 0 8px;color:#0b6e4f">'+plaga.n+'</h3>';
+  html += '<div style="font-size:12px;color:#5b6467;margin-bottom:14px">Ajusta las cantidades. Pueden convivir varios tipos en la misma sacudida.</div>';
+
+  plaga.subs.forEach(s => {
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 6px;border-bottom:1px solid #f0f0ee">'+
+      '<div style="font-size:15px;font-weight:600;color:#14181a">'+s.n+'</div>'+
+      '<div style="display:flex;align-items:center;gap:10px">'+
+        '<button class="sub-menos" data-cod="'+s.cod+'" style="width:38px;height:38px;border-radius:8px;border:1px solid #d5dad8;background:#fff;font-size:20px;font-weight:700;cursor:pointer">−</button>'+
+        '<div id="sub-n-'+s.cod+'" style="min-width:36px;text-align:center;font-size:22px;font-weight:600;color:#0b6e4f">'+temp[s.cod]+'</div>'+
+        '<button class="sub-mas" data-cod="'+s.cod+'" style="width:38px;height:38px;border-radius:8px;border:1px solid #0b6e4f;background:#0b6e4f;color:#fff;font-size:20px;font-weight:700;cursor:pointer">+</button>'+
+      '</div>'+
+    '</div>';
+  });
+
+  html += '<div style="margin-top:16px;display:flex;gap:8px">'+
+    '<button class="btn btn-s" style="flex:1" onclick="cerrar()">Cancelar</button>'+
+    '<button class="btn btn-s" style="flex:0.6;font-size:12px" id="sub-reset">Poner a 0</button>'+
+    '<button class="btn btn-guardar" style="flex:1.4" id="sub-guardar">Guardar</button>'+
+  '</div>';
+
+  document.getElementById("hoja").innerHTML = html;
+  document.getElementById("velo").classList.add("on");
+
+  // Wiring de +/-
+  document.querySelectorAll('.sub-mas').forEach(b => {
+    b.onclick = () => {
+      const cod = b.dataset.cod;
+      temp[cod] = (temp[cod]||0) + 1;
+      document.getElementById("sub-n-"+cod).textContent = temp[cod];
+    };
+  });
+  document.querySelectorAll('.sub-menos').forEach(b => {
+    b.onclick = () => {
+      const cod = b.dataset.cod;
+      if(temp[cod] > 0){
+        temp[cod]--;
+        document.getElementById("sub-n-"+cod).textContent = temp[cod];
+      }
+    };
+  });
+  document.getElementById("sub-reset").onclick = () => {
+    plaga.subs.forEach(s => {
+      temp[s.cod] = 0;
+      document.getElementById("sub-n-"+s.cod).textContent = "0";
+    });
+  };
+  document.getElementById("sub-guardar").onclick = () => {
+    S.sacActual[plaga.cod] = {...temp};
+    cerrar();
+    renderPlagas();
+  };
+}
+
+function guardarSac(sinCapturas){
+  if(!S.parcela){ aviso("Elige parcela"); return; }
+
+  // VALIDAR ANTES de crear muestreo (fix bug muestreo fantasma)
+  const totalCapturas = totalCapturasSacudida();
+  if(!sinCapturas && totalCapturas === 0){
+    aviso('Pulsa "Sin capturas" si no encontraste nada');
+    return;
+  }
+  if(sinCapturas && totalCapturas > 0){
+    // modal integrado en lugar de confirm() nativo
+    modalConfirmar({
+      titulo: "Confirmar sacudida",
+      mensaje: 'Tienes <b>' + totalCapturas + ' plaga(s) marcada(s)</b> en esta sacudida.<br><br>Si la guardas como "sin capturas", esos toques se descartarán.',
+      opciones: [
+        { texto: "Guardar CON las plagas marcadas", color: "#0b6e4f", accion: () => { guardarSacAhora(false); } },
+        { texto: "Descartar y marcar SIN capturas", color: "#c33", accion: () => { iniciarSacudida(); guardarSacAhora(true); } },
+        { texto: "Cancelar", color: "#666", accion: () => {} }
+      ]
+    });
+    return;
+  }
+  guardarSacAhora(sinCapturas);
+}
+
+function guardarSacAhora(sinCapturas){
+  const totalCapturas = totalCapturasSacudida();
+  // Solo AHORA aseguramos muestreo activo
+  if(!S.muestreoActivo || S.muestreoActivo.status === "finalizado"){
+    S.muestreoActivo = crearMuestreo(S.parcela);
+  }
+
+  const notaEl = document.getElementById("nota");
+  const nota = notaEl ? notaEl.value.trim() : "";
+  const numero = sacudidasDeMuestreo(S.muestreoActivo.id).length + 1;
+
+  const nueva = {
+    id: "S"+Date.now(),
+    muestreo_id: S.muestreoActivo.id,
+    fecha: new Date().toISOString(),
+    parcela: S.parcela,
+    numero: numero,
+    plagas: sinCapturas ? {} : JSON.parse(JSON.stringify(S.sacActual)),
+    sin_capturas: sinCapturas || totalCapturas === 0,
+    nota: nota,
+    lat: S.gps ? S.gps.lat : "",
+    lon: S.gps ? S.gps.lon : "",
+    precision: S.gps ? S.gps.prec : ""
+  };
+  const todas = sacudidas();
+  todas.push(nueva);
+  localStorage.setItem(K_SAC, JSON.stringify(todas));
+
+  S.ultimaSac = nueva.id;
+  mostrarDeshacer();
+  S.muestreoActivo.sacudidas_count = numero;
+
+  iniciarSacudida();
+  actualizarProgreso();
+  pintarMini();
+  actualizarPie();
+  renderSelectParcela();
+
+  aviso("Sacudida " + numero + " guardada" + (sinCapturas ? " (sin capturas)" : ""));
+
+  // Aviso especial al llegar a 100 sacudidas
+  if(numero === 100){
+    setTimeout(() => {
+      const cont = confirm("🎉 ¡Has llegado a 100 sacudidas en " + S.parcela + "!\n\nPuedes seguir añadiendo o pulsar Aceptar para finalizar la parcela ahora.");
+      if(cont) finalizarParcela();
+    }, 400);
+  }
+}
+
+function mostrarDeshacer(){
+  const b = document.getElementById("btn-deshacer-sac");
+  if(!b) return;
+  b.classList.add("on");
+  if(deshacerTimer) clearTimeout(deshacerTimer);
+  deshacerTimer = setTimeout(() => {
+    b.classList.remove("on");
+    S.ultimaSac = null;
+  }, VENTANA_DESHACER_MS);
+}
+
+function deshacerUltimaSac(){
+  if(!S.ultimaSac) return;
+  const todas = sacudidas();
+  const idx = todas.findIndex(s => s.id === S.ultimaSac);
+  if(idx < 0) return;
+  todas.splice(idx, 1);
+  localStorage.setItem(K_SAC, JSON.stringify(todas));
+  S.ultimaSac = null;
+  document.getElementById("btn-deshacer-sac").classList.remove("on");
+  if(deshacerTimer) clearTimeout(deshacerTimer);
+  if(S.muestreoActivo){
+    S.muestreoActivo.sacudidas_count = sacudidasDeMuestreo(S.muestreoActivo.id).length;
+  }
+  actualizarProgreso();
+  pintarMini();
+  actualizarPie();
+  renderListaParcelas();
+  renderSelectParcela();
+  aviso("Última sacudida deshecha");
+}
+
+function sacudidas(){
+  try{ return JSON.parse(localStorage.getItem(K_SAC) || "[]"); }
+  catch(e){ return []; }
+}
+
+function sacudidasHoy(){
+  const hoy = new Date().toISOString().slice(0,10);
+  return sacudidas().filter(s => s.fecha.slice(0,10) === hoy);
+}
+
+function sacudidasDeMuestreo(muestreoId){
+  return sacudidas().filter(s => s.muestreo_id === muestreoId);
+}
+
+function actualizarProgreso(){
+  const hechas = S.muestreoActivo ? sacudidasDeMuestreo(S.muestreoActivo.id) : [];
+  const total = hechas.length;
+  const nHechEl = document.getElementById("n-hech");
+  if(nHechEl) nHechEl.textContent = total;
+  const barra = document.getElementById("barra-avance-i");
+  if(barra){
+    const pct = Math.min(100, Math.round(total / 100 * 100));
+    barra.style.width = pct + "%";
+  }
+  const est = document.getElementById("estado-parc");
+  if(est){
+    if(S.muestreoActivo && S.muestreoActivo.status === "finalizado"){
+      est.textContent = "FINALIZADA";
+      est.className = "estado-parc finalizada";
+    } else {
+      est.textContent = "EN CURSO";
+      est.className = "estado-parc en-curso";
+    }
+  }
+
+  // Info del muestreo activo (fecha inicio, id corto)
+  const info = document.getElementById("info-muestreo");
+  if(info){
+    if(S.muestreoActivo){
+      const ini = new Date(S.muestreoActivo.fecha_inicio);
+      const hoy = new Date().toDateString();
+      const iniStr = ini.toDateString() === hoy
+        ? "hoy a las " + ini.toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"})
+        : ini.toLocaleString("es-ES",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
+      let txt = "Muestreo empezado " + iniStr;
+      info.textContent = txt;
+      info.style.display = "block";
+    } else {
+      info.style.display = "none";
+    }
+  }
+}
+
+function actualizarPie(){
+  document.getElementById("pie-n").textContent = sacudidasHoy().length;
+  document.getElementById("pie-parc").textContent = S.parcela || "Sin parcela";
+}
+
+// ============ GPS ============
+function pedirGPS(){
+  if(!navigator.geolocation){ aviso("Este dispositivo no tiene GPS"); return; }
+  const chip = document.getElementById("chip-gps");
+  chip.textContent = "Buscando…";
+  chip.className = "chip";
+
+  // Si ya había un watch anterior, cancelarlo
+  if(S.gpsWatchId != null){
+    try{ navigator.geolocation.clearWatch(S.gpsWatchId); }catch(e){}
+    S.gpsWatchId = null;
+  }
+
+  let primerFix = false;
+  const timeoutHandle = setTimeout(() => {
+    if(!primerFix){
+      const c = document.getElementById("chip-gps");
+      c.textContent = "GPS error";
+      c.className = "chip mal";
+      aviso("GPS: sin señal en 60s. Sal a cielo abierto o intenta de nuevo.");
+      if(S.gpsWatchId != null){
+        try{ navigator.geolocation.clearWatch(S.gpsWatchId); }catch(e){}
+        S.gpsWatchId = null;
+      }
+    }
+  }, 60000);
+
+  S.gpsWatchId = navigator.geolocation.watchPosition(
+    pos => {
+      primerFix = true;
+      clearTimeout(timeoutHandle);
+      S.gps = {lat: pos.coords.latitude, lon: pos.coords.longitude, prec: Math.round(pos.coords.accuracy)};
+      const c = document.getElementById("chip-gps");
+      c.textContent = "GPS ±"+S.gps.prec+"m";
+      c.className = "chip ok";
+      const gi = document.getElementById("gps-info");
+      if(gi){
+        gi.textContent = "GPS ±"+S.gps.prec+"m · "+S.gps.lat.toFixed(5)+", "+S.gps.lon.toFixed(5);
+        gi.classList.add("on");
+      }
+      pintarMini();
+      pintarMapaGrande();
+      chequearParcelaGPS();
+    },
+    err => {
+      const c = document.getElementById("chip-gps");
+      c.textContent = "GPS error";
+      c.className = "chip mal";
+      let msg = err.message || "error desconocido";
+      if(err.code === 1) msg = "Permiso denegado. Autoriza ubicación en ajustes.";
+      else if(err.code === 2) msg = "GPS no disponible. Comprueba ajustes de ubicación.";
+      else if(err.code === 3) msg = "Sin señal GPS. Sal a cielo abierto y espera 30s.";
+      aviso("GPS: " + msg);
+    },
+    {enableHighAccuracy: true, timeout: 60000, maximumAge: 5000}
+  );
+}
+
+function puntoEnPoligono(lon, lat, poly){
+  let dentro = false;
+  for(let i=0, j=poly.length-1; i<poly.length; j=i++){
+    const xi = poly[i][0], yi = poly[i][1];
+    const xj = poly[j][0], yj = poly[j][1];
+    const intersect = ((yi > lat) !== (yj > lat)) && (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+    if(intersect) dentro = !dentro;
+  }
+  return dentro;
+}
+
+function chequearParcelaGPS(){
+  if(!S.gps) return;
+  let encontrada = null;
+  Object.entries(POLIGONOS).forEach(([cod, poly]) => {
+    if(puntoEnPoligono(S.gps.lon, S.gps.lat, poly)) encontrada = cod;
+  });
+  S.parcelaDetectada = encontrada;
+  const banner = document.getElementById("parcela-detect");
+  const txt = document.getElementById("parcela-detect-txt");
+  if(encontrada && encontrada !== S.parcela){
+    txt.textContent = "El GPS te sitúa en " + encontrada;
+    banner.classList.add("on");
+  } else {
+    banner.classList.remove("on");
+  }
+}
+
+function usarDetectada(){
+  if(!S.parcelaDetectada) return;
+  document.getElementById("sel").value = S.parcelaDetectada;
+  cambParc();
+  document.getElementById("parcela-detect").classList.remove("on");
+}
+
+// ============ COLORES POR PARCELA ============
+const PALETA_PARCELAS = [
+  {borde:"#ffea00", relleno:"#ffea00"}, // amarillo
+  {borde:"#00b4d8", relleno:"#00b4d8"}, // cian
+  {borde:"#ff6b35", relleno:"#ff6b35"}, // naranja
+  {borde:"#c77dff", relleno:"#c77dff"}, // violeta
+  {borde:"#06d6a0", relleno:"#06d6a0"}, // verde menta
+  {borde:"#ffd166", relleno:"#ffd166"}, // amarillo claro
+  {borde:"#ef476f", relleno:"#ef476f"}, // rosa
+  {borde:"#118ab2", relleno:"#118ab2"}, // azul
+  {borde:"#e63946", relleno:"#e63946"}, // rojo
+  {borde:"#f77f00", relleno:"#f77f00"}, // naranja oscuro
+];
+function colorParcela(cod){
+  const codigos = Object.keys(POLIGONOS).sort();
+  const idx = codigos.indexOf(cod);
+  if(idx < 0) return PALETA_PARCELAS[0];
+  return PALETA_PARCELAS[idx % PALETA_PARCELAS.length];
+}
+
+function centroPoligono(poly){
+  let sumLat = 0, sumLon = 0;
+  poly.forEach(p => { sumLon += p[0]; sumLat += p[1]; });
+  return [sumLat / poly.length, sumLon / poly.length];
+}
+
+// ============ MINI-MAPA ============
+function pintarMini(){
+  if(!S.parcela || !POLIGONOS[S.parcela]) return;
+  const el = document.getElementById("mini");
+  if(!el) return;
+  if(!MAPA.mini){
+    MAPA.mini = L.map(el, {zoomControl:false, attributionControl:false}).setView([37.478,-5.9], 17);
+    crearCapaTiles().addTo(MAPA.mini);
+  }
+  const map = MAPA.mini;
+  if(MAPA.capaPoli){ try{ map.removeLayer(MAPA.capaPoli); }catch(e){} }
+  if(MAPA.capaGPS){ try{ map.removeLayer(MAPA.capaGPS); }catch(e){} }
+  if(MAPA.puntos){ try{ map.removeLayer(MAPA.puntos); }catch(e){} }
+  if(MAPA.capaEtiq){ try{ map.removeLayer(MAPA.capaEtiq); }catch(e){} }
+
+  const poly = POLIGONOS[S.parcela];
+  const col = colorParcela(S.parcela);
+  const latlngs = poly.map(p => [p[1], p[0]]);
+  MAPA.capaPoli = L.polygon(latlngs, {color:col.borde, weight:4, fillColor:col.relleno, fillOpacity:0.15}).addTo(map);
+  map.fitBounds(MAPA.capaPoli.getBounds(), {padding:[10,10]});
+
+  // Etiqueta con el código de parcela sobre el polígono
+  const centro = centroPoligono(poly);
+  MAPA.capaEtiq = L.marker(centro, {
+    icon: L.divIcon({
+      className: "etiq-parc",
+      html: '<div style="background:rgba(255,255,255,0.9);color:#14181a;padding:3px 9px;border-radius:6px;font-weight:700;font-size:13px;border:1.5px solid ' + col.borde + ';white-space:nowrap;text-align:center">' + S.parcela + '</div>',
+      iconSize: [60, 22],
+      iconAnchor: [30, 11]
+    })
+  }).addTo(map);
+
+  MAPA.puntos = L.layerGroup();
+  const hechas = S.muestreoActivo ? sacudidasDeMuestreo(S.muestreoActivo.id) : [];
+  hechas.forEach(s => {
+    if(s.lat && s.lon){
+      const conCap = !s.sin_capturas && tieneCapturas(s);
+      L.circleMarker([s.lat, s.lon], {
+        radius: 4, color:"#fff", weight:1,
+        fillColor: conCap ? "#d9a520" : "#0b6e4f", fillOpacity:0.9
+      }).addTo(MAPA.puntos);
+    }
+  });
+  MAPA.puntos.addTo(map);
+
+  if(S.gps){
+    MAPA.capaGPS = L.circleMarker([S.gps.lat, S.gps.lon], {radius:7, color:"#fff", weight:2, fillColor:"#1b5e9e", fillOpacity:1}).addTo(map);
+  }
+  setTimeout(() => map.invalidateSize(), 100);
+}
+
+// ============ MAPA GRANDE ============
+function pintarMapaGrande(){
+  const el = document.getElementById("mapa-grande");
+  if(!el) return;
+  const esPrimeraVez = !MAPA.grande;
+  if(!MAPA.grande){
+    MAPA.grande = L.map(el, {zoomControl:true, attributionControl:true}).setView([37.478,-5.9], 15);
+    MAPA.gCapaTiles = crearCapaTiles();
+    MAPA.gCapaTiles.addTo(MAPA.grande);
+  }
+  const map = MAPA.grande;
+  if(MAPA.gCapaParcelas){ try{ map.removeLayer(MAPA.gCapaParcelas); }catch(e){} }
+  if(MAPA.gCapaPuntos){ try{ map.removeLayer(MAPA.gCapaPuntos); }catch(e){} }
+  if(MAPA.gCapaGPS){ try{ map.removeLayer(MAPA.gCapaGPS); }catch(e){} }
+
+  const parcelas = Object.keys(POLIGONOS);
+  if(parcelas.length === 0){
+    document.getElementById("mapa-info").innerHTML = '<b>Sin mapa cargado</b><br><small>Ve a admin y carga un KMZ</small>';
+    setTimeout(() => map.invalidateSize(), 100);
+    return;
+  }
+
+  MAPA.gCapaParcelas = L.layerGroup();
+  const bounds = [];
+  Object.entries(POLIGONOS).forEach(([cod, poly]) => {
+    const latlngs = poly.map(p => [p[1], p[0]]);
+    const m = muestreoActivoDe(cod);
+    const finalizado = m && m.status === "finalizado";
+    const col = colorParcela(cod);
+    const p = L.polygon(latlngs, {
+      color: col.borde, weight:3,
+      fillColor: finalizado ? "#7a5230" : col.relleno,
+      fillOpacity: finalizado ? 0.30 : 0.18
+    });
+    p.bindTooltip(cod + (m ? " · " + m.sacudidas_count + " sacudidas" : ""), {permanent:false, direction:"top"});
+    p.on("click", () => {
+      document.getElementById("sel").value = cod;
+      cambParc();
+      ir("sac");
+    });
+    p.addTo(MAPA.gCapaParcelas);
+
+    // Etiqueta con el código sobre el polígono
+    const centro = centroPoligono(poly);
+    L.marker(centro, {
+      icon: L.divIcon({
+        className: "etiq-parc",
+        html: '<div style="background:rgba(255,255,255,0.9);color:#14181a;padding:3px 9px;border-radius:6px;font-weight:700;font-size:13px;border:1.5px solid ' + col.borde + ';white-space:nowrap;text-align:center">' + cod + '</div>',
+        iconSize: [60, 22],
+        iconAnchor: [30, 11]
+      })
+    }).addTo(MAPA.gCapaParcelas);
+
+    bounds.push(p.getBounds());
+  });
+  MAPA.gCapaParcelas.addTo(map);
+
+  // Puntos del último muestreo ACTIVO por parcela (los archivados no se pintan)
+  MAPA.gCapaPuntos = L.layerGroup();
+  const ultimosPorParcela = {};
+  muestreosActivos().forEach(m => {
+    const anterior = ultimosPorParcela[m.parcela];
+    if(!anterior || (m.fecha_inicio || "") > (anterior.fecha_inicio || "")){
+      ultimosPorParcela[m.parcela] = m;
+    }
+  });
+  Object.values(ultimosPorParcela).forEach(m => {
+    const sacs = sacudidasDeMuestreo(m.id);
+    sacs.forEach(s => {
+      if(s.lat && s.lon){
+        const conCap = !s.sin_capturas && tieneCapturas(s);
+        L.circleMarker([s.lat, s.lon], {
+          radius: 4, color:"#fff", weight:1,
+          fillColor: conCap ? "#d9a520" : "#0b6e4f", fillOpacity:0.9
+        }).bindTooltip(s.parcela + " · sacudida " + s.numero, {direction:"top"}).addTo(MAPA.gCapaPuntos);
+      }
+    });
+  });
+  MAPA.gCapaPuntos.addTo(map);
+
+  if(S.gps){
+    MAPA.gCapaGPS = L.circleMarker([S.gps.lat, S.gps.lon], {radius:8, color:"#fff", weight:2.5, fillColor:"#1b5e9e", fillOpacity:1}).addTo(map);
+  }
+
+  if(bounds.length && esPrimeraVez){
+    let all = bounds[0];
+    for(let i=1; i<bounds.length; i++) all = all.extend(bounds[i]);
+    map.fitBounds(all, {padding:[20,20]});
+  }
+
+  const nPuntos = sacudidasHoy().filter(s => s.lat && s.lon).length;
+  const nMuestreos = muestreos().filter(m => sacudidasDeMuestreo(m.id).length > 0).length;
+  document.getElementById("mapa-info").innerHTML =
+    '<b>' + parcelas.length + ' parcela(s) · ' + nPuntos + ' punto(s) GPS hoy</b><br>' +
+    '<small>Toca una parcela para ir a Sacudir en ella · <a href="javascript:reencuadrarMapa()" style="color:#0b6e4f;text-decoration:underline;font-weight:600">Reencuadrar</a></small>';
+  setTimeout(() => map.invalidateSize(), 100);
+}
+
+// reencuadrar mapa manualmente (para volver a la vista inicial cuando el usuario se ha "perdido" haciendo zoom)
+function reencuadrarMapa(){
+  if(!MAPA.grande) return;
+  const parcelas = Object.keys(POLIGONOS);
+  if(parcelas.length === 0) return;
+  const bounds = [];
+  Object.entries(POLIGONOS).forEach(([cod, poly]) => {
+    const latlngs = poly.map(p => [p[1], p[0]]);
+    bounds.push(L.polygon(latlngs).getBounds());
+  });
+  if(bounds.length){
+    let all = bounds[0];
+    for(let i=1; i<bounds.length; i++) all = all.extend(bounds[i]);
+    MAPA.grande.fitBounds(all, {padding:[20,20]});
+  }
+}
+
+// ============ NAVEGACIÓN ============
+function ir(v){
+  // al salir de admin, resetear S.admin para forzar PIN de nuevo la próxima vez
+  if(v !== "admin" && S.admin){
+    S.admin = false;
+    // Ocultar el contenido de admin y volver a mostrar el PIN
+    const pinDiv = document.getElementById("admin-pin");
+    const contentDiv = document.getElementById("admin-content");
+    if(pinDiv) pinDiv.style.display = "block";
+    if(contentDiv){ contentDiv.style.display = "none"; contentDiv.innerHTML = ""; }
+    const pinInput = document.getElementById("pin");
+    if(pinInput) pinInput.value = "";
+  }
+  document.getElementById("v-sac").style.display = v==="sac" ? "block" : "none";
+  document.getElementById("v-mapa").style.display = v==="mapa" ? "block" : "none";
+  document.getElementById("v-res").style.display = v==="res" ? "block" : "none";
+  document.getElementById("v-rec").style.display = v==="rec" ? "block" : "none";
+  document.getElementById("v-admin").style.display = v==="admin" ? "block" : "none";
+  document.getElementById("t-sac").className = v==="sac" ? "on" : "";
+  document.getElementById("t-mapa").className = v==="mapa" ? "on" : "";
+  document.getElementById("t-res").className = v==="res" ? "on" : "";
+  document.getElementById("t-rec").className = v==="rec" ? "on" : "";
+  document.getElementById("t-admin").className = v==="admin" ? "on" : "";
+  if(v==="res") renderListaParcelas();
+  if(v==="rec") renderRecientes();
+  if(v==="sac") setTimeout(pintarMini, 50);
+  if(v==="mapa") setTimeout(pintarMapaGrande, 50);
+  if(v==="admin") entrarAdmin();
+}
+
+// ============ LISTA DE PARCELAS EN RESUMEN (SOLO HOY, ACTIVOS, PLAGUERO) ============
+function renderListaParcelas(){
+  const c = document.getElementById("lista-parcelas");
+  if(!c) return;
+  const msTodos = muestreos();
+  const msActivos = muestreosActivos();
+  const hoy = new Date().toISOString().slice(0,10);
+  const msHoy = msActivos.filter(m => (m.fecha_inicio || "").slice(0,10) === hoy);
+
+  // Botón "Finalizar Jornada" solo si hay muestreos activos (aunque no sean de hoy)
+  const totalActivos = msActivos.length;
+
+  // SECCIÓN PENDIENTES DE ENVIAR (arriba del todo, destacada)
+  const pendientes = muestreosPendientesEnvio();
+  let htmlPendientes = "";
+  if(pendientes.length > 0){
+    const online = navigator.onLine;
+    const fA = fincaActiva();
+    const sinFinca = !fA;
+    htmlPendientes += '<div style="background:#fff5e0;border:2px solid #e6c98a;border-radius:10px;padding:14px;margin-bottom:16px">';
+    htmlPendientes += '<div style="font-weight:700;font-size:15px;color:#7a5230;margin-bottom:8px">⚠ ' + pendientes.length + ' muestreo(s) pendiente(s) de enviar</div>';
+    htmlPendientes += '<div style="font-size:11px;color:#7a5230;margin-bottom:10px">Están cerrados y no se pueden modificar. Envíalos al servidor cuando tengas conexión.</div>';
+    // Lista de pendientes
+    pendientes.forEach(p => {
+      const nSacs = sacudidasDeMuestreo(p.id).length;
+      const horaIni = p.fecha_inicio ? new Date(p.fecha_inicio).toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"}) : "—";
+      htmlPendientes += '<div style="background:#fff;border:1px solid #e6c98a;border-radius:6px;padding:8px 10px;margin-bottom:6px;font-size:12px">'+
+        '<b style="color:#14181a">' + p.parcela + '</b> · ' + nSacs + ' sacudida(s) · ' + horaIni +
+      '</div>';
+    });
+    // Botón
+    if(sinFinca){
+      htmlPendientes += '<div style="text-align:center;margin-top:8px"><button class="btn btn-guardar" style="width:100%;padding:12px;background:#aaa;cursor:not-allowed" disabled>⬆ Enviar al servidor</button></div>';
+      htmlPendientes += '<div style="text-align:center;font-size:11px;color:#c33;margin-top:6px;font-weight:600">✗ Sin finca activa — configúrala en Admin</div>';
+    } else if(!online){
+      htmlPendientes += '<div style="text-align:center;margin-top:8px"><button class="btn btn-guardar" style="width:100%;padding:12px;background:#aaa;cursor:not-allowed" disabled>⬆ Enviar al servidor</button></div>';
+      htmlPendientes += '<div style="text-align:center;font-size:11px;color:#c33;margin-top:6px;font-weight:600">🔴 Sin conexión — espera a tener wifi o datos móviles</div>';
+    } else {
+      htmlPendientes += '<div style="text-align:center;margin-top:8px"><button class="btn btn-guardar" style="width:100%;padding:12px" onclick="enviarPendientes()">⬆ Enviar al servidor (' + pendientes.length + ')</button></div>';
+    }
+    htmlPendientes += '</div>';
+  }
+
+  if(msHoy.length === 0){
+    let contenido = htmlPendientes;
+    if(msTodos.length > 0){
+      contenido += '<div class="vacio">No hay muestreos activos de hoy.<br><br><span style="font-size:12px;color:#8b9295">Hay ' + msTodos.length + ' muestreo(s) en el histórico.<br>Para consultarlos ve a la pestaña <b>Recientes</b>.</span></div>';
+    } else if(pendientes.length === 0){
+      contenido += '<div class="vacio">Aún no has empezado ningún muestreo</div>';
+    }
+    // Botón Finalizar Jornada si hay activos de días anteriores
+    if(totalActivos > 0){
+      contenido += '<div style="margin-top:14px;padding:12px;background:#faf7ef;border:1px dashed #d4c68a;border-radius:8px;font-size:12px;color:#7a5230">Tienes ' + totalActivos + ' muestreo(s) activo(s) de días anteriores sin cerrar.</div>';
+      contenido += '<div style="margin-top:12px"><button class="btn btn-guardar" style="width:100%;padding:14px;background:#7a5230" onclick="finalizarJornada()">🔒 Finalizar Jornada (' + totalActivos + ')</button></div>';
+    }
+    c.innerHTML = contenido;
+    return;
+  }
+
+  // Ordenar por hora de inicio DESC (más reciente arriba)
+  const listaOrd = msHoy.sort((a,b) => (b.fecha_inicio||"").localeCompare(a.fecha_inicio||""));
+
+  let html = htmlPendientes + '<div style="font-size:12px;color:#5b6467;margin-bottom:10px;padding:6px 10px;background:#f7f9f8;border-radius:6px">Mostrando <b>' + msHoy.length + '</b> muestreo(s) activo(s) de hoy · <a href="#" onclick="ir(\'rec\');return false;" style="color:#0b6e4f;font-weight:600">Ver histórico →</a></div>';
+
+  listaOrd.forEach(m => {
+    const sacs = sacudidasDeMuestreo(m.id);
+    const sinCap = sacs.filter(s => s.sin_capturas || !tieneCapturas(s)).length;
+    const conCap = sacs.length - sinCap;
+    const totales = {};
+    sacs.forEach(s => {
+      Object.keys(s.plagas || {}).forEach(cod => {
+        totales[cod] = (totales[cod]||0) + cantSacudida(s, cod);
+      });
+    });
+    const fechaIni = new Date(m.fecha_inicio).toLocaleString("es-ES",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
+    const claseEstado = m.status === "finalizado" ? "finalizada" : "en-curso";
+    const etiquetaEstado = m.status === "finalizado" ? "Finalizada" : "En curso";
+    html += '<div class="parc-item ' + claseEstado + '">';
+    html += '<div class="h"><b>' + m.parcela + '</b>';
+    html += '<span class="estado-parc ' + claseEstado + '">' + etiquetaEstado + '</span></div>';
+    html += '<div class="info">' + sacs.length + ' sacudidas · ' + conCap + ' con capturas · ' + sinCap + ' sin capturas</div>';
+    html += '<div class="info">Inicio: ' + fechaIni + (m.razon_finalizacion ? ' · Motivo: ' + m.razon_finalizacion : '') + '</div>';
+    // Top de plagas
+    const plagasOrden = Object.entries(totales).filter(([_,v]) => v>0).sort((a,b) => b[1]-a[1]).slice(0,3);
+    if(plagasOrden.length){
+      html += '<div class="info" style="margin-top:6px">Top: ';
+      html += plagasOrden.map(([cod, v]) => {
+        const p = CATALOGO.find(x => x.cod === cod);
+        const conP = sacs.filter(s => (s.plagas && s.plagas[cod])).length;
+        const pct = Math.round(conP/sacs.length*100);
+        return '<b>' + (p ? p.n : cod) + '</b> ' + pct + '%';
+      }).join(' · ');
+      html += '</div>';
+    }
+    // Botones de acciones
+    html += '<div style="margin-top:8px;text-align:right;display:flex;gap:6px;justify-content:flex-end">';
+    html += '<button class="btn btn-s" style="flex:none;padding:5px 12px;font-size:11px" onclick="generarPDFMuestreo(\'' + m.id + '\')">📄 PDF</button>';
+    if(m.status === "finalizado"){
+      html += '<button class="btn btn-s" style="flex:none;padding:5px 12px;font-size:11px" onclick="reabrirDesdeResumen(\'' + m.id + '\')">Reabrir</button>';
+    }
+    html += '</div>';
+    html += '</div>';
+  });
+
+  // Botón grande de Finalizar Jornada al final
+  html += '<div style="margin-top:18px;padding:14px;background:#eef4ec;border-radius:8px;border:1px solid #c8dfd2">'+
+    '<div style="font-size:13px;color:#0b6e4f;font-weight:600;margin-bottom:4px">Al terminar la jornada</div>'+
+    '<div style="font-size:11px;color:#5b6467;margin-bottom:10px">Cierra los ' + msHoy.length + ' muestreo(s) del día. Quedan listos para enviar al servidor en la sección de arriba.</div>'+
+    '<button class="btn btn-guardar" style="width:100%;padding:14px" onclick="finalizarJornada()">🔒 Finalizar Jornada</button>'+
+  '</div>';
+
+  c.innerHTML = html;
+}
+
+// ============ v24c: PESTAÑA RECIENTES (últimos 15 días) ============
+const DIAS_RECIENTES = 15;
+
+function muestreosRecientes(){
+  // Muestreos ARCHIVADOS de los últimos DIAS_RECIENTES días (por fecha_inicio)
+  const limite = new Date();
+  limite.setDate(limite.getDate() - DIAS_RECIENTES);
+  const limiteISO = limite.toISOString();
+  return muestreos()
+    .filter(m => m.archivado && m.fecha_inicio && m.fecha_inicio >= limiteISO)
+    .sort((a,b) => (b.fecha_inicio || "").localeCompare(a.fecha_inicio || ""));
+}
+
+function renderRecientes(){
+  const c = document.getElementById("lista-recientes");
+  if(!c) return;
+  const items = muestreosRecientes();
+
+  if(items.length === 0){
+    c.innerHTML = '<div class="vacio">Sin muestreos archivados en los últimos ' + DIAS_RECIENTES + ' días.<br><br><span style="font-size:12px;color:#8b9295">Aquí aparecerán los muestreos ya finalizados y archivados desde tu jornada.</span></div>';
+    return;
+  }
+
+  // Agrupar por día
+  const porDia = {};
+  items.forEach(m => {
+    const d = (m.fecha_inicio || "").slice(0,10);
+    if(!porDia[d]) porDia[d] = [];
+    porDia[d].push(m);
+  });
+
+  let html = '<div style="font-size:12px;color:#5b6467;margin-bottom:12px">Muestreos archivados de los últimos <b>' + DIAS_RECIENTES + '</b> días. Después de este periodo se borran del dispositivo pero permanecen en el servidor central.</div>';
+
+  Object.keys(porDia).sort().reverse().forEach(dia => {
+    const fecha = new Date(dia + "T00:00:00");
+    const fechaTxt = fecha.toLocaleDateString("es-ES", {weekday:"long", day:"2-digit", month:"long"});
+    const capitalized = fechaTxt.charAt(0).toUpperCase() + fechaTxt.slice(1);
+    html += '<div style="margin-top:16px"><h3 style="font-size:13px;color:#0b6e4f;margin:0 0 8px 0;padding-bottom:6px;border-bottom:1px solid #c8dfd2">'+capitalized+' · <span style="color:#5b6467;font-weight:normal">'+porDia[dia].length+' muestreo(s)</span></h3></div>';
+
+    porDia[dia].forEach(m => {
+      const sacs = sacudidasDeMuestreo(m.id);
+      const nSacs = sacs.length;
+      const horaIni = m.fecha_inicio ? new Date(m.fecha_inicio).toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"}) : "—";
+      const horaFin = m.fecha_fin ? new Date(m.fecha_fin).toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"}) : "—";
+      const durMin = (m.fecha_inicio && m.fecha_fin) ? Math.round((new Date(m.fecha_fin) - new Date(m.fecha_inicio)) / 60000) : null;
+
+      // Badge de estado (todos aquí están sincronizados por definición)
+      let badgeSync = '<span style="background:#e2f0ea;color:#0b6e4f;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:600">✓ EN SERVIDOR</span>';
+
+      let badgeStatus = '';
+      if(m.status === "finalizado"){
+        badgeStatus = '<span style="background:#e2f0ea;color:#0b6e4f;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:600;margin-left:4px">FINALIZADO</span>';
+      } else {
+        badgeStatus = '<span style="background:#fff5e0;color:#7a5230;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:600;margin-left:4px">'+(m.status || "?").toUpperCase()+'</span>';
+      }
+
+      html += '<div style="background:#fff;border:1px solid #d5dad8;border-radius:8px;padding:12px;margin-bottom:8px">'+
+        '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">'+
+          '<div>'+
+            '<div style="font-size:15px;font-weight:700;color:#14181a">' + m.parcela + '</div>'+
+            '<div style="font-size:11px;color:#5b6467;margin-top:2px">' + horaIni + ' → ' + horaFin + (durMin != null ? ' · ' + durMin + ' min' : '') + '</div>'+
+          '</div>'+
+          '<div style="text-align:right">'+badgeSync+badgeStatus+'</div>'+
+        '</div>'+
+        '<div style="font-size:11px;color:#5b6467;margin-bottom:10px">'+
+          '<b>' + nSacs + '</b> sacudida(s)'+
+          (m.plaguero ? ' · ' + m.plaguero : '')+
+          (m.razon_finalizacion ? ' · <i>' + m.razon_finalizacion + '</i>' : '')+
+        '</div>'+
+        '<button class="btn btn-guardar" style="width:100%;padding:10px;font-size:13px" onclick="generarPDFMuestreo(\''+m.id+'\')">📄 Descargar PDF</button>'+
+      '</div>';
+    });
+  });
+
+  c.innerHTML = html;
+}
+
+// PURGA AUTOMÁTICA de muestreos > DIAS_RECIENTES días
+// Solo se purga si el muestreo está sincronizado (para no perder nada)
+function purgarMuestreosAntiguos(){
+  const limite = new Date();
+  limite.setDate(limite.getDate() - DIAS_RECIENTES);
+  const limiteISO = limite.toISOString();
+  const ms = muestreos();
+  const originalCount = ms.length;
+
+  const conservar = ms.filter(m => {
+    // Nunca borrar los NO archivados (activos)
+    if(!m.archivado) return true;
+    // Nunca borrar los sin sincronizar (podrían perderse)
+    if(!m.sincronizado_en) return true;
+    // Si es archivado + sincronizado + antiguo → borrar
+    if(m.fecha_inicio && m.fecha_inicio < limiteISO) return false;
+    return true;
+  });
+
+  if(conservar.length !== originalCount){
+    // También hay que borrar las sacudidas huérfanas de los muestreos eliminados
+    const idsConservar = new Set(conservar.map(m => m.id));
+    const sacsFiltradas = sacudidas().filter(s => idsConservar.has(s.muestreo_id));
+    localStorage.setItem(K_SAC, JSON.stringify(sacsFiltradas));
+    guardarMuestreos(conservar);
+    console.log("[Purga v24c] Eliminados " + (originalCount - conservar.length) + " muestreo(s) antiguo(s) del dispositivo (siguen en servidor central)");
+  }
+}
+
+// ============ IMPORTAR MUESTREO DESDE EXCEL ============
+function importarMuestreoExcel(){
+  const inp = document.getElementById("fmuestreo");
+  if(!inp || !inp.files || inp.files.length === 0){
+    aviso("Selecciona un archivo Excel primero");
+    return;
+  }
+  const file = inp.files[0];
+  const reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, {type:"array"});
+
+      // Verificar hojas necesarias
+      if(!wb.SheetNames.includes("Sacudidas") || !wb.SheetNames.includes("Muestreos")){
+        aviso("El Excel no tiene el formato esperado (faltan hojas Sacudidas/Muestreos)");
+        return;
+      }
+
+      const filasSac = XLSX.utils.sheet_to_json(wb.Sheets["Sacudidas"]);
+      const filasMue = XLSX.utils.sheet_to_json(wb.Sheets["Muestreos"]);
+
+      if(filasMue.length === 0){
+        aviso("El Excel no contiene ningún muestreo");
+        return;
+      }
+
+      // Comprobar duplicados
+      const msExistentes = muestreos();
+      const idsExistentes = new Set(msExistentes.map(m => m.id));
+      const nuevos = filasMue.filter(f => !idsExistentes.has(f.muestreo_id));
+      const duplicados = filasMue.filter(f => idsExistentes.has(f.muestreo_id));
+
+      if(duplicados.length && nuevos.length === 0){
+        if(!confirm(duplicados.length + " muestreo(s) ya existen en la app. ¿Reemplazarlos?")) return;
+      } else if(duplicados.length){
+        if(!confirm(duplicados.length + " muestreo(s) duplicados serán omitidos. Se importarán " + nuevos.length + " nuevos. ¿Continuar?")) return;
+      }
+
+      // Reconstruir muestreos
+      const msFinales = msExistentes.filter(m => !duplicados.some(d => d.muestreo_id === m.id));
+      const ahoraImp = new Date().toISOString();
+      filasMue.forEach(f => {
+        msFinales.push({
+          id: f.muestreo_id,
+          parcela: f.parcela,
+          plaguero: f.plaguero || "",
+          fecha_inicio: f.fecha_inicio,
+          fecha_fin: f.fecha_fin || null,
+          status: f.status || "finalizado",
+          razon_finalizacion: f.razon_finalizacion || "Importado",
+          sacudidas_count: f.total_sacudidas || 0,
+          archivado: true,
+          fecha_archivo: ahoraImp,
+          archivado_por: "Importación Excel"
+        });
+      });
+      guardarMuestreos(msFinales);
+
+      // Reconstruir sacudidas — agrupar por sacudida_id
+      const sacsExistentes = sacudidas();
+      const idsSacExist = new Set(sacsExistentes.map(s => s.id));
+      const sacPorId = {};
+      filasSac.forEach(f => {
+        const sid = f.sacudida_id;
+        if(!sacPorId[sid]){
+          sacPorId[sid] = {
+            id: sid,
+            muestreo_id: f.muestreo_id,
+            fecha: f.fecha,
+            parcela: f.parcela,
+            numero: f.numero,
+            nota: f.nota || "",
+            lat: (f.gps_lat !== "" && f.gps_lat != null) ? Number(f.gps_lat) : null,
+            lon: (f.gps_lon !== "" && f.gps_lon != null) ? Number(f.gps_lon) : null,
+            gps_prec: (f.gps_precision !== "" && f.gps_precision != null) ? Number(f.gps_precision) : null,
+            plagas: {},
+            sin_capturas: false
+          };
+        }
+        // Añadir plaga a esta sacudida
+        if(f.plaga_cod === "(sin capturas)" || !f.plaga_cod){
+          sacPorId[sid].sin_capturas = true;
+        } else {
+          const cod = f.plaga_cod;
+          // El Excel guarda "subtipo_nombre" (ej "Vivas", "Muertas", "Negro"). Mapear al código interno.
+          const subNombreRaw = f.subtipo_nombre || f.subtipo || "";  // compatibilidad con Excel antiguo
+          const subNombre = String(subNombreRaw).trim();
+          const cant = Number(f.cantidad) || 1;
+          const pDef = CATALOGO.find(x => x.cod === cod);
+          const tieneSubs = pDef && pDef.subs && pDef.subs.length;
+
+          // Resolver código de subtipo desde el nombre — con matching flexible
+          let subCod = "";
+          if(tieneSubs && subNombre){
+            // Normalizar: minúsculas, sin 's' final, sin acentos suaves
+            const norm = s => String(s).toLowerCase().trim().replace(/s$/, '');
+            const subNombreN = norm(subNombre);
+            const found = pDef.subs.find(sd => {
+              const nName = norm(sd.n);
+              const nCode = String(sd.cod).toLowerCase();
+              return nName === subNombreN ||
+                     nCode === subNombre.toLowerCase() ||
+                     nName.includes(subNombreN) ||
+                     subNombreN.includes(nName);
+            });
+            if(found) subCod = found.cod;
+            else console.warn("Subtipo no reconocido:", cod, subNombre);
+          }
+
+          if(tieneSubs && subCod){
+            // Formato con subtipos
+            if(typeof sacPorId[sid].plagas[cod] !== "object" || sacPorId[sid].plagas[cod] == null){
+              sacPorId[sid].plagas[cod] = {};
+              pDef.subs.forEach(sd => { sacPorId[sid].plagas[cod][sd.cod] = 0; });
+            }
+            sacPorId[sid].plagas[cod][subCod] = (sacPorId[sid].plagas[cod][subCod] || 0) + cant;
+          } else {
+            // Formato plano (compatibilidad Excel viejo sin subtipo)
+            if(typeof sacPorId[sid].plagas[cod] === "object" && sacPorId[sid].plagas[cod] != null){
+              if(tieneSubs){
+                const primerSub = pDef.subs[0].cod;
+                sacPorId[sid].plagas[cod][primerSub] = (sacPorId[sid].plagas[cod][primerSub] || 0) + cant;
+              } else {
+                sacPorId[sid].plagas[cod] = cant;
+              }
+            } else {
+              sacPorId[sid].plagas[cod] = (sacPorId[sid].plagas[cod] || 0) + cant;
+            }
+          }
+        }
+      });
+
+      // Filtrar duplicados en sacudidas (reemplazar si estaban)
+      const idsSacNuevos = new Set(Object.keys(sacPorId));
+      const sacsFinales = sacsExistentes.filter(s => !idsSacNuevos.has(s.id));
+
+      // DIAGNÓSTICO — resumen del import
+      let diagPlano = 0, diagSubtipos = 0, diagSubtiposDetalle = {};
+      Object.values(sacPorId).forEach(s => {
+        Object.entries(s.plagas).forEach(([cod, v]) => {
+          if(typeof v === "object"){
+            diagSubtipos++;
+            Object.entries(v).forEach(([sub, n]) => {
+              if(n > 0){
+                const k = cod + "|" + sub;
+                diagSubtiposDetalle[k] = (diagSubtiposDetalle[k] || 0) + n;
+              }
+            });
+          } else if(v > 0){
+            diagPlano++;
+            const k = cod + "|(sin subtipo)";
+            diagSubtiposDetalle[k] = (diagSubtiposDetalle[k] || 0) + v;
+          }
+        });
+        const tieneAlgo = totalCapturasEn(s) > 0;
+        if(tieneAlgo) s.sin_capturas = false;
+        sacsFinales.push(s);
+      });
+      console.log("=== DIAGNÓSTICO DE IMPORT (v23d) ===");
+      console.log("Sacudidas con plagas en formato plano (sin subtipos):", diagPlano);
+      console.log("Sacudidas con plagas en formato subtipos:", diagSubtipos);
+      console.log("Detalle acumulado por cod|subtipo:");
+      console.table(diagSubtiposDetalle);
+      localStorage.setItem(K_SAC, JSON.stringify(sacsFinales));
+
+      // Refresco
+      render();
+      if(S.admin) renderAdminContent();
+
+      const nMuestreos = filasMue.length;
+      const nSacudidas = Object.keys(sacPorId).length;
+      aviso("Importados " + nMuestreos + " muestreo(s) y " + nSacudidas + " sacudidas · Archivados en histórico");
+
+      // Refrescar la vista Admin para que aparezcan en Explorar
+      if(S.admin) setTimeout(() => renderAdminContent(), 300);
+    } catch(err){
+      console.error("Error importando:", err);
+      aviso("Error al leer el Excel: " + err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ============ PDF RESUMEN POR MUESTREO ============
+function generarPDFMuestreo(muestreoId){
+  const m = muestreos().find(x => x.id === muestreoId);
+  if(!m){ aviso("Muestreo no encontrado"); return; }
+  const sacs = sacudidasDeMuestreo(muestreoId);
+  if(sacs.length === 0){ aviso("Este muestreo no tiene sacudidas"); return; }
+  const poly = POLIGONOS[m.parcela];
+  if(!poly){ aviso("No hay polígono cargado para " + m.parcela); return; }
+
+  try{
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({orientation:"portrait", unit:"mm", format:"a4"});
+    const PW = 210, PH = 297;
+    const MG = 15;
+    // plaguero prioridad al del muestreo, si vacío el del localStorage
+    const plaguero = m.plaguero || localStorage.getItem(K_PLAGUERO) || "(sin nombre)";
+    // cabecera con código de finca activa (o "JARILLA" fallback si no hay ninguna)
+    const fA = fincaActiva();
+    const codFinca = fA ? fA.codigo : "JARILLA";
+    const nombreFinca = fA ? fA.nombre_completo : "JARILLA";
+
+    // ==== Cabecera compacta ====
+    doc.setFillColor(11, 110, 79);
+    doc.rect(0, 0, PW, 24, "F");
+    doc.setTextColor(255,255,255);
+    doc.setFont("helvetica","bold");
+    doc.setFontSize(18);
+    doc.text(nombreFinca + " · " + m.parcela, MG, 11);
+
+    const fechaIni = new Date(m.fecha_inicio);
+    const fechaFin = m.fecha_fin ? new Date(m.fecha_fin) : null;
+    const durMin = fechaFin ? Math.round((fechaFin - fechaIni) / 60000) : null;
+    const fechaTxt = fechaIni.toLocaleDateString("es-ES",{weekday:"long",day:"2-digit",month:"long",year:"numeric"});
+    const horaIni = fechaIni.toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"});
+    const horaFin = fechaFin ? fechaFin.toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"}) : "—";
+
+    doc.setFontSize(9);
+    doc.setFont("helvetica","normal");
+    doc.text(fechaTxt, MG, 17);
+    // Línea con datos operativos
+    let cabTxt = "Plaguero: " + plaguero + "   ·   Inicio: " + horaIni + "   ·   Fin: " + horaFin;
+    if(durMin != null) cabTxt += "   ·   Duración: " + durMin + " min";
+    doc.text(cabTxt, MG, 22);
+
+    if(m.status === "finalizado"){
+      doc.setFillColor(255,255,255);
+      doc.roundedRect(PW - MG - 40, 13, 40, 7, 1.5, 1.5, "F");
+      doc.setTextColor(11,110,79);
+      doc.setFont("helvetica","bold");
+      doc.setFontSize(9);
+      doc.text("FINALIZADO", PW - MG - 20, 17.5, {align:"center"});
+    }
+
+    // ==== Bloque de números compacto ====
+    let y = 30;
+    doc.setTextColor(20,24,26);
+    doc.setFont("helvetica","bold");
+    doc.setFontSize(10);
+    doc.text("Resumen del muestreo", MG, y);
+    y += 3;
+    doc.setDrawColor(220,220,220);
+    doc.line(MG, y, PW - MG, y);
+    y += 5;
+
+    const total = sacs.length;
+    const conCap = sacs.filter(s => !s.sin_capturas && tieneCapturas(s)).length;
+    const sinCap = total - conCap;
+    const pctPresencia = total > 0 ? Math.round(conCap/total*100) : 0;
+
+    // Calcular recorrido (Haversine entre sacudidas consecutivas)
+    function haversineM(lat1, lon1, lat2, lon2){
+      const R = 6371000;
+      const toRad = x => x * Math.PI / 180;
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
+      const a = Math.sin(dLat/2)*Math.sin(dLat/2) +
+                Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)*Math.sin(dLon/2);
+      return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+    let recorridoM = 0;
+    const sacsOrd = sacs.filter(s => s.lat && s.lon).sort((a,b) => (a.fecha||"").localeCompare(b.fecha||""));
+    for(let i = 1; i < sacsOrd.length; i++){
+      recorridoM += haversineM(sacsOrd[i-1].lat, sacsOrd[i-1].lon, sacsOrd[i].lat, sacsOrd[i].lon);
+    }
+    const recorridoTxt = recorridoM >= 1000 ? (recorridoM/1000).toFixed(2) + " km" : Math.round(recorridoM) + " m";
+    const ritmoTxt = (durMin != null && total > 0) ? (durMin/total).toFixed(1) + " min/sac" : "—";
+
+    // 4 columnas compactas (añadida "Recorrido")
+    const colW = (PW - 2*MG) / 4;
+    const cajas = [
+      {label:"Sacudidas", num: total.toString()},
+      {label:"Con capturas", num: conCap + " ("+pctPresencia+"%)"},
+      {label:"Sin capturas", num: sinCap + " ("+(100-pctPresencia)+"%)"},
+      {label:"Recorrido", num: recorridoTxt}
+    ];
+    cajas.forEach((c, i) => {
+      const x0 = MG + i*colW;
+      doc.setFillColor(245, 247, 246);
+      doc.roundedRect(x0, y, colW - 3, 15, 2, 2, "F");
+      doc.setTextColor(90,100,103);
+      doc.setFont("helvetica","normal");
+      doc.setFontSize(7);
+      doc.text(c.label.toUpperCase(), x0 + 3, y + 5);
+      doc.setTextColor(11,110,79);
+      doc.setFont("helvetica","bold");
+      doc.setFontSize(12);
+      doc.text(c.num, x0 + 3, y + 12);
+    });
+    y += 20;
+
+    // Ritmo pequeño abajo
+    doc.setFontSize(7);
+    doc.setFont("helvetica","italic");
+    doc.setTextColor(120,125,128);
+    doc.text("Ritmo medio: " + ritmoTxt, MG, y);
+    y += 5;
+
+    // ==== Tabla de plagas ====
+    // Colores por familia (base) y por subtipo — con máximo contraste visual
+    const COLORES_FAMILIA = {
+      'TRIPS':[237,161,0], 'MVERDE':[99,153,34], 'AUX':[27,175,122],
+      'PULGON':[227,73,72], 'ARANA':[74,58,167], 'MOSCA':[232,123,164],
+      'ANARSIA':[186,117,23], 'CABEZUDO':[139,90,43], 'HORMIGAS':[70,40,20],
+      'LEPRA':[24,95,165], 'OIDIO':[153,153,153], 'ROYA':[178,73,27],
+      'OTROS':[100,100,100]
+    };
+    // Colores específicos por subtipo — MUY distintos para que se vean bien
+    const COLORES_SUBTIPO = {
+      // Araña — 3 tonalidades del mismo violeta (familia coherente)
+      'ARANA|VIV': [74, 58, 167],    // Violeta intenso (activo)
+      'ARANA|HL':  [144, 137, 199],  // Violeta medio (potencial futuro)
+      'ARANA|MUE': [212, 208, 229],  // Violeta muy claro (sin actividad)
+      // Trips — 2 tonalidades del naranja base
+      'TRIPS|NEG': [237, 141, 30],   // Naranja intenso
+      'TRIPS|BLA': [247, 210, 145]   // Naranja claro
+    };
+    function colorSubtipo(fCod, subCod){
+      if(subCod){
+        const key = fCod + "|" + subCod;
+        if(COLORES_SUBTIPO[key]) return COLORES_SUBTIPO[key];
+      }
+      return COLORES_FAMILIA[fCod] || [100,100,100];
+    }
+
+    // Contar presencia, cantidad Y focos por (familia, subtipo)
+    const totales = {}; // key = "COD|SUB"
+    sacs.forEach(s => {
+      Object.entries(s.plagas || {}).forEach(([cod, v]) => {
+        if(v == null) return;
+        if(typeof v === "object"){
+          Object.entries(v).forEach(([subCod, subN]) => {
+            if(subN > 0){
+              const k = cod + "|" + subCod;
+              if(!totales[k]) totales[k] = {cod, subCod, sacsCon:0, individuos:0, focosCount:0};
+              totales[k].sacsCon += 1;
+              totales[k].individuos += subN;
+              if(subN > 10) totales[k].focosCount += 1;
+            }
+          });
+        } else if(v > 0){
+          const k = cod + "|";
+          if(!totales[k]) totales[k] = {cod, subCod:"", sacsCon:0, individuos:0, focosCount:0};
+          totales[k].sacsCon += 1;
+          totales[k].individuos += v;
+          if(v > 10) totales[k].focosCount += 1;
+        }
+      });
+    });
+    const plagasOrden = Object.values(totales).sort((a,b) => b.sacsCon - a.sacsCon);
+
+    if(plagasOrden.length){
+      doc.setTextColor(20,24,26);
+      doc.setFont("helvetica","bold");
+      doc.setFontSize(10);
+      doc.text("Presencia por plaga", MG, y);
+      y += 3;
+      doc.setDrawColor(220,220,220);
+      doc.line(MG, y, PW - MG, y);
+      y += 4;
+
+      // Layout de columnas — recalculado para caber bien en A4 (PW=595pt / 210mm)
+      // Nombre a la izquierda, barra en el medio, números a la derecha
+      const anchoTabla = PW - 2*MG;
+      const xCirculo = MG + 3;
+      const xNombre = MG + 7;
+      const xBarraIni = MG + 65;      // % PRESENCIA (barra)
+      const anchoBarra = 45;
+      const xPct = xBarraIni + anchoBarra + 3;   // % número
+      const xN = xPct + 22;             // N (de X)
+      const xMedia = xN + 22;           // MEDIA
+      const xFocos = xMedia + 22;       // FOCOS
+
+      // Cabecera tabla
+      doc.setFillColor(245,247,246);
+      doc.rect(MG, y, anchoTabla, 6, "F");
+      doc.setTextColor(90,100,103);
+      doc.setFont("helvetica","bold");
+      doc.setFontSize(7);
+      doc.text("PLAGA", xNombre, y + 4);
+      doc.text("% PRESENCIA", xBarraIni, y + 4);
+      doc.text("N (de "+total+")", xN, y + 4, {align:"right"});
+      doc.text("MEDIA (pres.)", xMedia, y + 4, {align:"right"});
+      doc.text("FOCOS (>10)", xFocos, y + 4, {align:"right"});
+      y += 6;
+
+      // Agrupar por familia
+      const familiasConSub = {}; // cod -> [entries]
+      const plagasSueltas = [];
+      plagasOrden.forEach(entry => {
+        const p = CATALOGO.find(x => x.cod === entry.cod);
+        if(p && p.subs && entry.subCod){
+          if(!familiasConSub[entry.cod]) familiasConSub[entry.cod] = [];
+          familiasConSub[entry.cod].push(entry);
+        } else {
+          plagasSueltas.push(entry);
+        }
+      });
+
+      doc.setFont("helvetica","normal");
+      doc.setFontSize(8.5);
+
+      // Función para pintar una fila de subtipo o plaga suelta
+      function pintarFila(entry, esSubtipo){
+        const {cod, subCod, sacsCon, individuos, focosCount:foco} = entry;
+        const p = CATALOGO.find(x => x.cod === cod);
+        let nombre = p ? p.n : cod;
+        if(subCod && p && p.subs){
+          const s = p.subs.find(x => x.cod === subCod);
+          nombre = "  · " + (s ? s.n : subCod).toLowerCase();
+        }
+        const pct = Math.round(sacsCon/total*100);
+        const c = colorSubtipo(cod, subCod);
+        const media = (individuos / sacsCon).toFixed(1);
+        const activo = subActivo(cod, subCod);
+
+        // Círculo de color
+        doc.setFillColor(c[0], c[1], c[2]);
+        doc.circle(xCirculo, y + 3, 1.4, "F");
+
+        // Barra visual
+        doc.setFillColor(230,235,232);
+        doc.rect(xBarraIni, y + 1.5, anchoBarra, 3, "F");
+        doc.setFillColor(c[0], c[1], c[2]);
+        doc.rect(xBarraIni, y + 1.5, anchoBarra * pct/100, 3, "F");
+
+        doc.setTextColor(20,24,26);
+        doc.setFont("helvetica", esSubtipo ? "normal" : "normal");
+        doc.text(nombre, xNombre, y + 4);
+        doc.text(pct + "%", xPct, y + 4, {align:"right"});
+        doc.text(sacsCon.toString(), xN, y + 4, {align:"right"});
+        doc.text(media, xMedia, y + 4, {align:"right"});
+        // Focos: solo si el subtipo es activo
+        if(activo){
+          if(foco > 0){
+            doc.setTextColor(178, 44, 44);
+            doc.setFont("helvetica","bold");
+          } else {
+            doc.setTextColor(140,145,148);
+            doc.setFont("helvetica","normal");
+          }
+          doc.text(foco.toString(), xFocos, y + 4, {align:"right"});
+        } else {
+          doc.setTextColor(160,165,168);
+          doc.setFont("helvetica","normal");
+          doc.text("—", xFocos, y + 4, {align:"right"});
+        }
+        doc.setFont("helvetica","normal");
+        y += 6;
+      }
+
+      // Pintar familias con subtipos primero (con cabecera de familia)
+      Object.entries(familiasConSub).forEach(([famCod, entries]) => {
+        const p = CATALOGO.find(x => x.cod === famCod);
+        // Cabecera de familia — negrita, color base familia
+        const cFam = COLORES_FAMILIA[famCod] || [80,80,80];
+        // Ordenar subtipos por presencia desc
+        entries.sort((a,b) => b.sacsCon - a.sacsCon);
+        // Cabecera
+        doc.setFillColor(cFam[0], cFam[1], cFam[2]);
+        doc.circle(xCirculo, y + 3, 1.6, "F");
+        doc.setTextColor(20,24,26);
+        doc.setFont("helvetica","bold");
+        doc.setFontSize(9);
+        doc.text(p ? p.n : famCod, xNombre, y + 4);
+        // Total presencia familia (contando cualquier subtipo)
+        const sacsSetFam = new Set();
+        sacs.forEach(s => {
+          const cant = (s.plagas && typeof s.plagas[famCod] === "object")
+            ? Object.values(s.plagas[famCod]).reduce((a,b) => a+(b||0), 0)
+            : (s.plagas ? s.plagas[famCod]||0 : 0);
+          if(cant > 0) sacsSetFam.add(s.id);
+        });
+        const pctFam = Math.round(sacsSetFam.size/total*100);
+        doc.setFont("helvetica","normal");
+        doc.setFontSize(8);
+        doc.setTextColor(90,100,103);
+        doc.text("(" + pctFam + "%, " + sacsSetFam.size + " sacs)", xBarraIni, y + 4);
+        y += 6;
+        // Filas de subtipos
+        doc.setFontSize(8.5);
+        entries.forEach(entry => pintarFila(entry, true));
+        y += 1;
+      });
+
+      // Plagas sueltas al final
+      if(plagasSueltas.length){
+        plagasSueltas.forEach(entry => pintarFila(entry, false));
+      }
+    } else {
+      doc.setTextColor(90,100,103);
+      doc.setFontSize(9);
+      doc.setFont("helvetica","italic");
+      doc.text("Ninguna plaga detectada en este muestreo.", MG, y+5);
+      y += 10;
+    }
+    y += 5;
+
+    // ==== Mapa visual ====
+    doc.setTextColor(20,24,26);
+    doc.setFont("helvetica","bold");
+    doc.setFontSize(11);
+    doc.text("Distribución espacial · " + m.parcela, MG, y);
+    y += 4;
+    doc.setDrawColor(220,220,220);
+    doc.line(MG, y, PW - MG, y);
+    y += 4;
+
+    // Zona del mapa
+    const mapaAlto = 130;
+    const mapaAncho = PW - 2*MG;
+    const mapaX = MG;
+    const mapaY = y;
+    doc.setDrawColor(200,205,203);
+    doc.setFillColor(252,252,250);
+    doc.rect(mapaX, mapaY, mapaAncho, mapaAlto, "FD");
+
+    // Calcular bounds a partir del polígono + todos los puntos de sacudidas
+    let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
+    poly.forEach(p => {
+      if(p[1] < minLat) minLat = p[1];
+      if(p[1] > maxLat) maxLat = p[1];
+      if(p[0] < minLon) minLon = p[0];
+      if(p[0] > maxLon) maxLon = p[0];
+    });
+    sacs.forEach(s => {
+      if(s.lat && s.lon){
+        if(s.lat < minLat) minLat = s.lat;
+        if(s.lat > maxLat) maxLat = s.lat;
+        if(s.lon < minLon) minLon = s.lon;
+        if(s.lon > maxLon) maxLon = s.lon;
+      }
+    });
+
+    // Padding
+    const padLat = (maxLat - minLat) * 0.08 || 0.0001;
+    const padLon = (maxLon - minLon) * 0.08 || 0.0001;
+    minLat -= padLat; maxLat += padLat;
+    minLon -= padLon; maxLon += padLon;
+
+    // Proyectar manteniendo aspect ratio real
+    const latRange = maxLat - minLat;
+    const lonRange = maxLon - minLon;
+    const latMed = (minLat + maxLat) / 2;
+    const kmPorLat = 111;
+    const kmPorLon = 111 * Math.cos(latMed * Math.PI/180);
+    const anchoRealKm = lonRange * kmPorLon;
+    const altoRealKm = latRange * kmPorLat;
+    const escalaAncho = mapaAncho / anchoRealKm;
+    const escalaAlto = mapaAlto / altoRealKm;
+    const escala = Math.min(escalaAncho, escalaAlto) * 0.95;
+    const centroX = mapaX + mapaAncho / 2;
+    const centroY = mapaY + mapaAlto / 2;
+    const proj = (lat, lon) => {
+      const dxKm = (lon - (minLon+maxLon)/2) * kmPorLon;
+      const dyKm = (lat - (minLat+maxLat)/2) * kmPorLat;
+      return {
+        x: centroX + dxKm * escala,
+        y: centroY - dyKm * escala
+      };
+    };
+
+    // Dibujar polígono
+    const col = colorParcela(m.parcela);
+    const rgbBorde = hexARgb(col.borde);
+    doc.setDrawColor(rgbBorde[0], rgbBorde[1], rgbBorde[2]);
+    doc.setFillColor(rgbBorde[0], rgbBorde[1], rgbBorde[2]);
+    doc.setLineWidth(0.7);
+    const pts = poly.map(p => proj(p[1], p[0]));
+    // Fill semi-transparente simulado con GState si está disponible
+    if(doc.setGState){
+      doc.setGState(new doc.GState({opacity: 0.12}));
+      for(let i = 0; i < pts.length; i++){
+        const p1 = pts[i], p2 = pts[(i+1) % pts.length];
+        doc.line(p1.x, p1.y, p2.x, p2.y);
+      }
+      // fill con líneas de polígono
+      const polyPoints = pts.map(p => [p.x, p.y]);
+      doc.lines(
+        polyPoints.slice(1).map((p, i) => [p[0]-polyPoints[i][0], p[1]-polyPoints[i][1]]),
+        polyPoints[0][0], polyPoints[0][1],
+        [1,1], "F"
+      );
+      doc.setGState(new doc.GState({opacity: 1}));
+    }
+    // Borde
+    for(let i = 0; i < pts.length; i++){
+      const p1 = pts[i], p2 = pts[(i+1) % pts.length];
+      doc.line(p1.x, p1.y, p2.x, p2.y);
+    }
+
+    // Dibujar puntos coloreados por plaga dominante — con tamaño gradual + marca de nota
+    // Escala de tamaños según cantidad de la familia dominante
+    function radioSegunCantidad(n){
+      if(n <= 0) return 0.8;
+      if(n <= 2) return 1.0;
+      if(n <= 5) return 1.4;
+      if(n <= 10) return 1.9;
+      if(n <= 15) return 2.5;
+      return 3.2; // 16+ = foco grande
+    }
+
+    // Recolectar notas para lista de página 2
+    const notasList = [];
+    sacs.forEach(s => {
+      if(s.nota && s.nota.trim()){
+        notasList.push({num: s.numero, nota: s.nota.trim(), lat: s.lat, lon: s.lon});
+      }
+    });
+    const notaIdx = {};
+    notasList.forEach((n, i) => { notaIdx[n.num] = i + 1; });
+
+    let focosCount = 0;
+    const focosPorPlaga = {};
+
+    // Helper: subtipo activo o no
+    function subActivo(cod, subCod){
+      const p = CATALOGO.find(x => x.cod === cod);
+      if(!p || !p.subs) return true; // sin subtipos → siempre activo
+      if(!subCod) return true;
+      const s = p.subs.find(x => x.cod === subCod);
+      return s ? (s.activo !== false) : true;
+    }
+
+    // Helper: cantidad activa de una plaga en una sacudida (excluye subtipos con activo:false)
+    function cantidadActiva(sac, cod){
+      if(!sac || !sac.plagas || sac.plagas[cod] == null) return 0;
+      const v = sac.plagas[cod];
+      if(typeof v !== "object") return v || 0;
+      const p = CATALOGO.find(x => x.cod === cod);
+      if(!p || !p.subs) return Object.values(v).reduce((a,b) => a+(b||0), 0);
+      let s = 0;
+      Object.entries(v).forEach(([subCod, subN]) => {
+        const sd = p.subs.find(x => x.cod === subCod);
+        if(sd && sd.activo === false) return;
+        s += subN || 0;
+      });
+      return s;
+    }
+
+    sacs.forEach(s => {
+      if(!s.lat || !s.lon) return;
+      const p = proj(s.lat, s.lon);
+      const conCap = tieneCapturas(s);
+
+      if(!conCap){
+        // Sin capturas → punto pequeño gris
+        doc.setFillColor(180, 178, 169);
+        doc.circle(p.x, p.y, 0.8, "F");
+      } else {
+        // Buscar dominante ACTIVO para el COLOR (ignorar muertas)
+        let domFam = null, maxActiva = 0, domSub = null, maxSubActiva = 0;
+        // Y aparte, la suma total (todos los subtipos) para el TAMAÑO
+        let totalCant = 0, totalActiva = 0;
+
+        Object.entries(s.plagas || {}).forEach(([cod, v]) => {
+          const activaFam = cantidadActiva(s, cod);
+          const totalFam = (typeof v === "object")
+            ? Object.values(v).reduce((a,b) => a+(b||0), 0)
+            : (v||0);
+          totalCant += totalFam;
+          totalActiva += activaFam;
+
+          // Dominante para color = solo cuenta la parte activa
+          if(activaFam > maxActiva){
+            maxActiva = activaFam;
+            domFam = cod;
+            if(typeof v === "object"){
+              maxSubActiva = 0;
+              domSub = null;
+              Object.entries(v).forEach(([subCod, subN]) => {
+                if(!subActivo(cod, subCod)) return; // ignorar muertas
+                if(subN > maxSubActiva){ maxSubActiva = subN; domSub = subCod; }
+              });
+            } else {
+              domSub = null;
+            }
+          }
+        });
+
+        // Si no hay dominante activo (ejemplo: solo muertas), usamos el visible pero solo para color de fondo
+        if(!domFam){
+          Object.entries(s.plagas || {}).forEach(([cod, v]) => {
+            const totalFam = (typeof v === "object") ? Object.values(v).reduce((a,b) => a+(b||0), 0) : (v||0);
+            if(totalFam > 0 && !domFam){
+              domFam = cod;
+              if(typeof v === "object"){
+                let mx = 0;
+                Object.entries(v).forEach(([subCod, subN]) => {
+                  if(subN > mx){ mx = subN; domSub = subCod; }
+                });
+              }
+            }
+          });
+        }
+
+        const c = colorSubtipo(domFam, domSub);
+        const radius = radioSegunCantidad(totalCant); // Tamaño según total (incluye muertas)
+
+        // FOCO solo si actividad viva > 10
+        const esFoco = totalActiva > 10;
+        if(esFoco){
+          focosCount++;
+          focosPorPlaga[domFam] = (focosPorPlaga[domFam] || 0) + 1;
+        }
+
+        doc.setFillColor(c[0], c[1], c[2]);
+        if(esFoco){
+          // Anillo negro grueso para destacar
+          doc.setDrawColor(30, 30, 30);
+          doc.setLineWidth(0.6);
+        } else {
+          doc.setDrawColor(255,255,255);
+          doc.setLineWidth(0.15);
+        }
+        doc.circle(p.x, p.y, radius, "FD");
+      }
+
+      // Marca de nota — superíndice pequeño numerado (discreto)
+      if(notaIdx[s.numero] != null){
+        doc.setTextColor(30, 30, 30);
+        doc.setFont("helvetica","bold");
+        doc.setFontSize(6);
+        doc.text(notaIdx[s.numero].toString(), p.x + 1.8, p.y - 1.2);
+      }
+    });
+
+    // ==== Rosa de vientos (esquina superior derecha del mapa) ====
+    const rosaCx = mapaX + mapaAncho - 10;
+    const rosaCy = mapaY + 10;
+    const rosaR = 5;
+    // Fondo circular semi-translúcido para legibilidad
+    doc.setFillColor(255,255,255);
+    doc.setDrawColor(140,145,148);
+    doc.setLineWidth(0.25);
+    doc.circle(rosaCx, rosaCy, rosaR + 1, "FD");
+    // Cruz
+    doc.setDrawColor(60, 65, 68);
+    doc.setLineWidth(0.4);
+    doc.line(rosaCx, rosaCy - rosaR, rosaCx, rosaCy + rosaR); // vertical
+    doc.line(rosaCx - rosaR, rosaCy, rosaCx + rosaR, rosaCy); // horizontal
+    // Flecha del Norte (triángulo negro apuntando arriba)
+    doc.setFillColor(30, 30, 30);
+    doc.triangle(
+      rosaCx, rosaCy - rosaR - 0.5,
+      rosaCx - 1.5, rosaCy - rosaR + 2,
+      rosaCx + 1.5, rosaCy - rosaR + 2,
+      "F"
+    );
+    // Etiquetas N/S/E/W
+    doc.setTextColor(30, 30, 30);
+    doc.setFont("helvetica","bold");
+    doc.setFontSize(6);
+    doc.text("N", rosaCx, rosaCy - rosaR - 2.5, {align:"center"});
+    doc.text("S", rosaCx, rosaCy + rosaR + 3.5, {align:"center"});
+    doc.text("E", rosaCx + rosaR + 2, rosaCy + 1, {align:"center"});
+    doc.text("O", rosaCx - rosaR - 2, rosaCy + 1, {align:"center"});
+
+    // ==== Barra de escala (esquina inferior izquierda del mapa) ====
+    // Elegir escala redonda según ancho real
+    const anchoRealM = anchoRealKm * 1000;
+    let escalaMetros;
+    if(anchoRealM < 80) escalaMetros = 10;
+    else if(anchoRealM < 200) escalaMetros = 25;
+    else if(anchoRealM < 400) escalaMetros = 50;
+    else if(anchoRealM < 800) escalaMetros = 100;
+    else if(anchoRealM < 2000) escalaMetros = 200;
+    else escalaMetros = 500;
+
+    // Ancho de la barra en unidades PDF
+    const barraAnchoPdf = (escalaMetros / 1000) * escala; // escala es unidades/km
+    const barraX = mapaX + 4;
+    const barraY = mapaY + mapaAlto - 6;
+    const barraH = 1.8;
+
+    // Barra 2 segmentos negro/blanco tipo cartográfico
+    doc.setDrawColor(30, 30, 30);
+    doc.setLineWidth(0.3);
+    // Segmento izquierdo negro
+    doc.setFillColor(30, 30, 30);
+    doc.rect(barraX, barraY, barraAnchoPdf/2, barraH, "FD");
+    // Segmento derecho blanco con borde
+    doc.setFillColor(255, 255, 255);
+    doc.rect(barraX + barraAnchoPdf/2, barraY, barraAnchoPdf/2, barraH, "FD");
+    // Etiquetas
+    doc.setTextColor(30, 30, 30);
+    doc.setFont("helvetica","normal");
+    doc.setFontSize(6);
+    doc.text("0", barraX, barraY - 0.8);
+    doc.text(escalaMetros + " m", barraX + barraAnchoPdf, barraY - 0.8, {align:"right"});
+
+    y = mapaY + mapaAlto + 5;
+
+    // Bloque focos identificados (si hay)
+    if(focosCount > 0){
+      doc.setFontSize(9);
+      doc.setFont("helvetica","bold");
+      doc.setTextColor(178, 44, 44);
+      doc.text("Focos activos detectados (>10 indiv. vivos): " + focosCount + " sacudida(s)", MG, y);
+      y += 3;
+      doc.setFontSize(7);
+      doc.setFont("helvetica","normal");
+      doc.setTextColor(90,100,103);
+      const partes = Object.entries(focosPorPlaga).map(([cod, n]) => {
+        const pp = CATALOGO.find(x => x.cod === cod);
+        return (pp ? pp.n : cod) + ": " + n;
+      });
+      doc.text(partes.join("  ·  "), MG, y + 2);
+      y += 5;
+    }
+
+    // Aviso de notas al final de página 1 (si hay)
+    if(notasList.length > 0){
+      y += 2;
+      doc.setFontSize(8);
+      doc.setFont("helvetica","normal");
+      doc.setTextColor(90,100,103);
+      doc.text("Hay " + notasList.length + " nota(s) marcadas con superíndice en el mapa. Ver detalle en página siguiente.", MG, y);
+      y += 4;
+    }
+
+    // Leyenda: cada subtipo/plaga con su color real + escala de tamaños
+    if(plagasOrden.length){
+      doc.setTextColor(90,100,103);
+      doc.setFont("helvetica","normal");
+      doc.setFontSize(7);
+      let xLeg = MG;
+      const yLeg = y + 1;
+      doc.setFont("helvetica","bold");
+      doc.text("PLAGAS:", xLeg, yLeg);
+      doc.setFont("helvetica","normal");
+      xLeg += 14;
+
+      // Deduplicar por (cod, subCod) manteniendo el mismo orden que la tabla
+      const yaMostrados = new Set();
+      plagasOrden.forEach(({cod, subCod}) => {
+        const key = cod + "|" + (subCod || "");
+        if(yaMostrados.has(key)) return;
+        yaMostrados.add(key);
+
+        const p = CATALOGO.find(x => x.cod === cod);
+        let nombre = p ? p.n : cod;
+        if(subCod && p && p.subs){
+          const s = p.subs.find(x => x.cod === subCod);
+          nombre = (p.n) + " " + (s ? s.n.toLowerCase() : subCod.toLowerCase());
+        }
+        const c = colorSubtipo(cod, subCod);
+        if(xLeg + 30 > PW - MG){
+          y += 4;
+          xLeg = MG + 14;
+        }
+        doc.setFillColor(c[0], c[1], c[2]);
+        doc.circle(xLeg + 1.2, yLeg - 0.8, 1.1, "F");
+        doc.setTextColor(20,24,26);
+        doc.text(nombre, xLeg + 3, yLeg);
+        xLeg += doc.getTextWidth(nombre) + 7;
+      });
+      // Sin capturas
+      if(xLeg + 30 > PW - MG){ y += 4; xLeg = MG + 14; }
+      doc.setFillColor(180, 178, 169);
+      doc.circle(xLeg + 1.2, yLeg - 0.8, 1.1, "F");
+      doc.setTextColor(20,24,26);
+      doc.text("Sin capturas", xLeg + 3, yLeg);
+      y = yLeg + 5;
+
+      // Escala de tamaños
+      doc.setFont("helvetica","bold");
+      doc.setFontSize(7);
+      doc.setTextColor(90,100,103);
+      let xEsc = MG;
+      const yEsc = y + 1;
+      doc.text("TAMAÑO:", xEsc, yEsc);
+      xEsc += 15;
+      doc.setFont("helvetica","normal");
+      const escala = [
+        {r:1.0, l:"1-2"}, {r:1.4, l:"3-5"}, {r:1.9, l:"6-10"}, {r:2.5, l:"11-15"}, {r:3.2, l:"16+"}
+      ];
+      escala.forEach(e => {
+        doc.setFillColor(120,120,120);
+        doc.circle(xEsc + e.r, yEsc - 0.8, e.r, "F");
+        doc.setTextColor(20,24,26);
+        doc.text(e.l, xEsc + e.r*2 + 1, yEsc);
+        xEsc += e.r*2 + doc.getTextWidth(e.l) + 5;
+      });
+      y = yEsc + 4;
+    }
+
+    // Bloque NOTAS en página 2 dedicada
+    if(notasList.length){
+      doc.addPage();
+      let yn = MG;
+
+      // Cabecera compacta
+      doc.setFillColor(11, 110, 79);
+      doc.rect(0, 0, PW, 22, "F");
+      doc.setTextColor(255,255,255);
+      doc.setFont("helvetica","bold");
+      doc.setFontSize(16);
+      doc.text(nombreFinca + " · " + m.parcela + " — Notas del muestreo", MG, 14);
+      doc.setFontSize(9);
+      doc.setFont("helvetica","normal");
+      doc.text(fechaTxt, MG, 19);
+      yn = 32;
+
+      // Introducción
+      doc.setFont("helvetica","normal");
+      doc.setFontSize(9);
+      doc.setTextColor(90,100,103);
+      const introTxt = "Observaciones adicionales anotadas durante el muestreo. Cada nota corresponde a una sacudida específica y aparece marcada con un asterisco rojo en el mapa de la página anterior.";
+      const introLines = doc.splitTextToSize(introTxt, PW - 2*MG);
+      introLines.forEach(l => { doc.text(l, MG, yn); yn += 4.5; });
+      yn += 6;
+
+      // Lista de notas
+      notasList.forEach((n, i) => {
+        if(yn > PH - 20){
+          // Nueva página si no cabe
+          doc.addPage();
+          yn = MG;
+        }
+        // Fondo caja
+        doc.setFillColor(252, 250, 244);
+        doc.setDrawColor(220, 60, 40, 0.5);
+        doc.setLineWidth(0.3);
+        const noteBoxH = 14;
+        doc.roundedRect(MG, yn - 2, PW - 2*MG, noteBoxH, 2, 2, "FD");
+
+        // Asterisco rojo
+        doc.setFillColor(220, 60, 40);
+        doc.circle(MG + 5, yn + 3, 2.2, "F");
+        doc.setTextColor(255,255,255);
+        doc.setFont("helvetica","bold");
+        doc.setFontSize(9);
+        doc.text("*", MG + 5, yn + 4.2, {align:"center"});
+
+        // Texto de la nota
+        doc.setTextColor(20,24,26);
+        doc.setFont("helvetica","bold");
+        doc.setFontSize(10);
+        doc.text("Sacudida " + n.num, MG + 12, yn + 3);
+
+        doc.setFont("helvetica","normal");
+        doc.setFontSize(10);
+        doc.setTextColor(50,55,58);
+        const noteLines = doc.splitTextToSize(n.nota, PW - 2*MG - 40);
+        noteLines.forEach((line, li) => {
+          doc.text(line, MG + 12, yn + 8.5 + li*4);
+        });
+
+        yn += Math.max(noteBoxH, 8 + noteLines.length*4) + 3;
+      });
+    }
+
+    // ==== Pie de página (aplicado a TODAS las páginas) ====
+    const totalPaginas = doc.internal.getNumberOfPages();
+    for(let pg = 1; pg <= totalPaginas; pg++){
+      doc.setPage(pg);
+      doc.setTextColor(150,150,150);
+      doc.setFont("helvetica","italic");
+      doc.setFontSize(7);
+      const pieY = PH - 8;
+      doc.setDrawColor(220,220,220);
+      doc.line(MG, pieY - 3, PW - MG, pieY - 3);
+      const genTxt = "Generado " + new Date().toLocaleString("es-ES") + "  ·  " + m.id;
+      doc.text(genTxt, MG, pieY);
+      if(totalPaginas > 1){
+        doc.text("Pág " + pg + "/" + totalPaginas, PW - MG, pieY, {align:"right"});
+      }
+    }
+
+    // Guardar
+    const nombreArchivo = "MUESTREO_" + m.parcela + "_" + m.fecha_inicio.slice(0,10) + ".pdf";
+    doc.save(nombreArchivo);
+    aviso("PDF generado: " + nombreArchivo);
+  } catch(e){
+    console.error("Error generando PDF:", e);
+    aviso("Error al generar PDF: " + e.message);
+  }
+}
+
+function hexARgb(hex){
+  const h = hex.replace("#","");
+  return [parseInt(h.substr(0,2),16), parseInt(h.substr(2,2),16), parseInt(h.substr(4,2),16)];
+}
+
+// ============ EXCEL ============
+function _codFincaExcel(){
+  const fA = fincaActiva();
+  return fA ? fA.codigo : "SINFINCA";
+}
+
+function exportarExcel(){
+  const ms = muestreos();
+  if(ms.length === 0){ aviso("No hay muestreos para exportar"); return; }
+  construirExcel(ms, "SACUDIDAS_" + _codFincaExcel() + "_COMPLETO_" + new Date().toISOString().slice(0,10) + ".xlsx");
+}
+
+function exportarExcelHoy(){
+  const hoy = new Date().toISOString().slice(0,10);
+  const msHoy = muestreos().filter(m => (m.fecha_inicio || "").slice(0,10) === hoy);
+  if(msHoy.length === 0){ aviso("No hay muestreos de hoy"); return; }
+  construirExcel(msHoy, "SACUDIDAS_" + _codFincaExcel() + "_" + hoy + ".xlsx");
+}
+
+function exportarExcelDeMuestreo(muestreoId){
+  const m = muestreos().find(x => x.id === muestreoId);
+  if(!m){ aviso("Muestreo no encontrado"); return; }
+  construirExcel([m], "SACUDIDAS_" + m.parcela + "_" + m.fecha_inicio.slice(0,10) + ".xlsx");
+}
+
+function exportarExcelDeParcela(codParcela){
+  const msPar = muestreos().filter(m => m.parcela === codParcela);
+  if(msPar.length === 0){ aviso("No hay muestreos de esa parcela"); return; }
+  construirExcel(msPar, "SACUDIDAS_" + codParcela + "_TODO.xlsx");
+}
+
+function exportarExcelFiltrado(muestreosFiltrados, sufijo){
+  if(muestreosFiltrados.length === 0){ aviso("No hay muestreos que exportar con esos filtros"); return; }
+  construirExcel(muestreosFiltrados, "SACUDIDAS_" + sufijo + ".xlsx");
+}
+
+function construirExcel(msSubset, nombreArchivo){
+  const idsSubset = new Set(msSubset.map(m => m.id));
+  const todas = sacudidas().filter(s => idsSubset.has(s.muestreo_id));
+  const muestreoById = {};
+  msSubset.forEach(m => muestreoById[m.id] = m);
+  const plaguero = localStorage.getItem(K_PLAGUERO) || "";
+
+  // Hoja 1: SACUDIDAS (formato largo)
+  const filas = [];
+  todas.forEach(s => {
+    const m = muestreoById[s.muestreo_id] || {};
+    const base = {
+      sacudida_id: s.id,
+      muestreo_id: s.muestreo_id || "",
+      muestreo_fecha_inicio: m.fecha_inicio || "",
+      muestreo_fecha_fin: m.fecha_fin || "",
+      muestreo_status: m.status || "",
+      razon_finalizacion: m.razon_finalizacion || "",
+      plaguero: plaguero,
+      fecha: s.fecha,
+      parcela: s.parcela,
+      numero: s.numero,
+      nota: s.nota || "",
+      gps_lat: s.lat,
+      gps_lon: s.lon,
+      gps_precision: s.precision || s.gps_prec || ""
+    };
+    // Construir capturas expandiendo subtipos
+    const capturas = [];
+    Object.entries(s.plagas || {}).forEach(([cod, v]) => {
+      if(v == null) return;
+      if(typeof v === "object"){
+        // Con subtipos
+        Object.entries(v).forEach(([subCod, subN]) => {
+          if(subN > 0){
+            capturas.push({cod, subCod, cantidad: subN});
+          }
+        });
+      } else if(v > 0){
+        capturas.push({cod, subCod: "", cantidad: v});
+      }
+    });
+    if(capturas.length === 0){
+      filas.push({...base, plaga_cod: "", plaga_nombre: "(sin capturas)", subtipo_nombre: "", cantidad: 0});
+    } else {
+      capturas.forEach(({cod, subCod, cantidad}) => {
+        const p = CATALOGO.find(x => x.cod === cod);
+        let subNombre = "";
+        if(subCod && p && p.subs){
+          const s = p.subs.find(x => x.cod === subCod);
+          subNombre = s ? s.n : subCod;
+        }
+        filas.push({
+          ...base,
+          plaga_cod: cod,
+          plaga_nombre: p ? p.n : cod,
+          subtipo_nombre: subNombre,
+          cantidad
+        });
+      });
+    }
+  });
+
+  // Hoja 2: MUESTREOS (uno por fila)
+  const filasM = msSubset.map(m => {
+    const sacs = sacudidasDeMuestreo(m.id);
+    const totales = {};
+    sacs.forEach(s => {
+      Object.keys(s.plagas || {}).forEach(cod => {
+        totales[cod] = (totales[cod]||0) + cantSacudida(s, cod);
+      });
+    });
+    return {
+      muestreo_id: m.id,
+      parcela: m.parcela,
+      plaguero: m.plaguero || plaguero,
+      fecha_inicio: m.fecha_inicio || "",
+      fecha_fin: m.fecha_fin || "",
+      status: m.status || "",
+      razon_finalizacion: m.razon_finalizacion || "",
+      total_sacudidas: sacs.length,
+      sacudidas_con_capturas: sacs.filter(s => !s.sin_capturas && tieneCapturas(s)).length,
+      capturas_totales: Object.values(totales).reduce((a,b)=>a+b, 0)
+    };
+  });
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas), "Sacudidas");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filasM), "Muestreos");
+
+  // Hoja 3: RESUMEN POR PARCELA
+  const filasResumen = [];
+  msSubset.forEach(m => {
+    const sacs = sacudidasDeMuestreo(m.id);
+    if(sacs.length === 0) return;
+    CATALOGO.forEach(p => {
+      const conP = sacs.filter(s => cantSacudida(s, p.cod) > 0);
+      const nPresencia = conP.length;
+      if(nPresencia === 0) return;
+      const totalIndividuos = conP.reduce((a, s) => a + (s.plagas[p.cod] || 0), 0);
+      const mediaPorSacudidaConPresencia = totalIndividuos / nPresencia;
+      filasResumen.push({
+        muestreo_id: m.id,
+        parcela: m.parcela,
+        fecha_inicio: m.fecha_inicio || "",
+        status: m.status,
+        plaga_cod: p.cod,
+        plaga_nombre: p.n,
+        total_sacudidas_muestreo: sacs.length,
+        sacudidas_con_presencia: nPresencia,
+        porcentaje_presencia: Math.round(nPresencia / sacs.length * 100 * 10) / 10,
+        total_individuos: totalIndividuos,
+        media_por_sacudida_con_presencia: Math.round(mediaPorSacudidaConPresencia * 10) / 10
+      });
+    });
+  });
+  if(filasResumen.length){
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filasResumen), "Resumen por parcela");
+  }
+
+  XLSX.writeFile(wb, nombreArchivo);
+  aviso("Excel descargado ("+filas.length+" filas · "+filasM.length+" muestreos)");
+}
+
+// ============ ADMIN ============
+function entrarAdmin(){
+  if(S.admin){
+    renderAdminContent();
+    document.getElementById("admin-pin").style.display = "none";
+    document.getElementById("admin-content").style.display = "block";
+  } else {
+    document.getElementById("admin-pin").style.display = "block";
+    document.getElementById("admin-content").style.display = "none";
+    setTimeout(() => {
+      const p = document.getElementById("pin-tab");
+      if(p){
+        p.value = "";
+        p.focus();
+        p.onkeydown = ev => { if(ev.key === "Enter") checkPinTab(); };
+      }
+    }, 100);
+  }
+}
+
+function checkPinTab(){
+  const v = (document.getElementById("pin-tab").value || "").trim();
+  if(v !== PIN_ADMIN){ aviso("PIN incorrecto"); return; }
+  S.admin = true;
+  entrarAdmin();
+}
+
+function renderAdminContent(){
+  const nPoli = Object.keys(POLIGONOS).length;
+  const nSac = sacudidas().length;
+  const nMues = muestreos().length;
+  const plaguero = localStorage.getItem(K_PLAGUERO) || "";
+  idbCount().then(nTiles => {
+    const mbAprox = (nTiles * 40 / 1024).toFixed(1);
+    let html = '<h2>Administración</h2>';
+    html += '<div class="card">';
+
+    // 0. CONFIGURACIÓN DE FINCA (NUEVO v24)
+    const fincas = fincasGuardadas();
+    const fActiva = fincaActiva();
+    // estado del catálogo
+    const catDescTS = localStorage.getItem(K_CATALOGO_DESC);
+    const catDescFecha = catDescTS ? new Date(catDescTS).toLocaleString("es-ES",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}) : null;
+    const nPlagas = CATALOGO.length;
+    const catOK = nPlagas > 0 && fincas.length > 0;
+    // Panel de estado catálogo/fincas
+    html += '<div style="background:'+(catOK ? '#eef4ec' : '#fdecea')+';border:1px solid '+(catOK ? '#c8dfd2' : '#c33')+';border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:11px;color:#5b6467">'+
+      '<div style="font-weight:700;color:'+(catOK ? '#0b6e4f' : '#c33')+';margin-bottom:4px">Estado de catálogos</div>'+
+      '<div>Fincas: <b>'+fincas.length+'</b> disponibles</div>'+
+      '<div>Plagas: <b>'+nPlagas+'</b> disponibles'+(catDescFecha ? ' · última descarga: '+catDescFecha : ' · sin descargar')+'</div>'+
+    '</div>';
+
+    html += '<div style="background:#fff5e0;border:1px solid #e6c98a;border-radius:8px;padding:12px;margin-bottom:14px">'+
+      '<div style="font-weight:700;font-size:14px;color:#7a5230;margin-bottom:6px">🏡 Finca activa</div>';
+    if(fincas.length === 0){
+      html += '<div style="font-size:12px;color:#7a5230;margin-bottom:10px">Aún no se han descargado las fincas desde el catálogo central. Necesitas conexión para descargarlas la primera vez.</div>';
+    } else {
+      html += '<div style="font-size:12px;color:#7a5230;margin-bottom:8px">'+fincas.length+' fincas disponibles en el catálogo local.</div>';
+      html += '<div style="font-size:11px;color:#5b6467;margin-bottom:4px">Actualmente activa: <b style="color:'+(fActiva ? '#0b6e4f' : '#c33')+'">'+(fActiva ? fActiva.nombre_completo + ' ('+fActiva.codigo+')' : '(ninguna)')+'</b></div>';
+      html += '<label style="font-size:12px;color:#5b6467">Elegir nueva finca<select id="f-finca-activa" style="width:100%;padding:10px;border:1px solid #d5dad8;border-radius:6px;margin-top:6px;font-size:14px">';
+      html += '<option value="">-- Elige una finca --</option>';
+      fincas.forEach(f => {
+        const sel = (fActiva && fActiva.id === f.id) ? ' selected' : '';
+        html += '<option value="'+f.id+'"'+sel+'>'+f.codigo+' — '+f.nombre_completo+' ('+f.provincia+')</option>';
+      });
+      html += '</select></label>';
+      html += '<div style="text-align:right;margin-top:8px"><button class="btn btn-s" style="flex:none;padding:8px 14px;font-size:12px;background:#0b6e4f;color:#fff" onclick="guardarFincaActiva()">✓ Guardar finca activa</button></div>';
+    }
+    // destinatarios de correos con input inline (solo si hay finca activa)
+    if(fActiva){
+      const dests = destinatariosDeFinca(fActiva.codigo);
+      html += '<div style="margin-top:14px;padding-top:12px;border-top:1px dashed #e6c98a">';
+      html += '<div style="font-size:12px;color:#7a5230;margin-bottom:8px"><b>📧 Destinatarios de partes</b> <span style="opacity:0.7">(para esta finca)</span></div>';
+      // Lista actual
+      if(dests.length === 0){
+        html += '<div style="font-size:11px;color:#7a5230;background:#fff;border:1px dashed #d4c68a;border-radius:6px;padding:10px;margin-bottom:8px;font-style:italic;text-align:center">Sin destinatarios configurados</div>';
+      } else {
+        html += '<div style="margin-bottom:8px">';
+        dests.forEach(email => {
+          html += '<div style="font-size:12px;background:#fff;border:1px solid #e6c98a;border-radius:6px;padding:7px 10px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">'+
+            '<span style="color:#14181a;word-break:break-all;flex:1">📧 '+email+'</span>'+
+            '<button onclick="borrarDestinatario(\''+email.replace(/'/g,"\\'")+'\')" title="Borrar" style="background:none;border:none;color:#c33;cursor:pointer;font-size:18px;padding:0 4px;flex:none;line-height:1">×</button>'+
+          '</div>';
+        });
+        html += '</div>';
+      }
+      // Input inline + botón añadir
+      html += '<div style="display:flex;gap:4px">';
+      html += '<input type="email" id="input-nuevo-dest" placeholder="correo@ejemplo.com" onkeydown="onKeydownDest(event)" style="flex:1;padding:8px 10px;border:1px solid #d5dad8;border-radius:6px;font-size:12px;font-family:inherit">';
+      html += '<button class="btn btn-s" style="flex:none;padding:8px 12px;font-size:12px;background:#7a5230;color:#fff" onclick="añadirDestinatario()">+ Añadir</button>';
+      html += '</div>';
+      // Mensaje de error inline (oculto por defecto)
+      html += '<div id="err-dest" style="display:none;font-size:11px;color:#c33;background:#fdecea;border:1px solid #f5b5b0;border-radius:4px;padding:5px 8px;margin-top:6px;text-align:center"></div>';
+      html += '</div>';
+    }
+    html += '<div style="text-align:right;margin-top:10px;border-top:1px solid #e6c98a;padding-top:10px"><button class="btn btn-s" style="flex:none;padding:8px 14px;font-size:12px;background:#8b5a2b;color:#fff" onclick="descargarFincas()">'+(fincas.length === 0 ? 'Descargar catálogos (fincas + plagas)' : 'Actualizar catálogos (fincas + plagas)')+'</button></div>';
+    html += '</div>';
+
+    // 1. Nombre del plaguero (v24c-2: reforzado visual)
+    html += '<div style="background:#eef4ec;border:1px solid #c8dfd2;border-radius:8px;padding:12px;margin-bottom:14px">'+
+      '<div style="font-weight:700;font-size:14px;color:#0b6e4f;margin-bottom:6px">👤 Nombre del plaguero (esta tablet)</div>'+
+      '<div style="font-size:11px;color:#5b6467;margin-bottom:4px">Actualmente configurado: <b style="color:'+(plaguero ? '#0b6e4f' : '#c33')+'">'+(plaguero || '(sin configurar)')+'</b></div>'+
+      '<input type="text" id="f-plaguero" value="'+plaguero.replace(/"/g,'&quot;')+'" placeholder="Ej: Juan Pérez" style="width:100%;padding:10px;border:1px solid #d5dad8;border-radius:6px;margin-top:6px;font-size:15px">'+
+      '<div style="text-align:right;margin-top:8px"><button class="btn btn-s" style="flex:none;padding:8px 14px;font-size:12px;background:#0b6e4f;color:#fff" onclick="guardarPlaguero()">✓ Guardar nombre</button></div>'+
+    '</div>';
+
+    // 2. Stats
+    html += '<p style="color:#5b6467;font-size:13px;margin:0 0 12px">'+nPoli+' parcelas · '+nMues+' muestreos · '+nSac+' sacudidas</p>';
+
+    // 3. MAPAS OFFLINE (SECCIÓN DESTACADA)
+    html += '<div style="background:#e2f0ea;border:1px solid #a5d0bc;border-radius:8px;padding:12px;margin-bottom:14px">'+
+      '<div style="font-weight:700;font-size:14px;color:#0b6e4f;margin-bottom:4px">📶 Mapas para trabajar sin conexión</div>'+
+      '<div style="font-size:12px;color:#0b6e4f;margin-bottom:10px">'+
+        (nTiles > 0
+          ? '<b>' + nTiles.toLocaleString("es-ES") + '</b> imágenes cacheadas (~' + mbAprox + ' MB) · Listo para offline'
+          : 'Sin cachear todavía. Descarga los mapas antes de ir al campo.')+
+      '</div>'+
+      '<button class="btn btn-guardar" style="flex:none;padding:10px 14px;font-size:13px;width:100%" onclick="abrirPrecarga()" ' + (nPoli === 0 ? 'disabled' : '') + '>'+
+        (nTiles > 0 ? 'Actualizar mapas offline' : 'Descargar mapas offline') +
+      '</button>'+
+      (nPoli === 0 ? '<div style="font-size:11px;color:#5b6467;margin-top:6px">Primero carga un mapa de parcelas ↓</div>' : '') +
+    '</div>';
+
+    // 3b. DESCARGAR POLÍGONOS DEL SERVIDOR (v25a - nueva funcionalidad)
+    const tsDescarga = localStorage.getItem("monitoreo.poligonos_ts");
+    const tsTxt = tsDescarga ? new Date(parseInt(tsDescarga)).toLocaleString("es-ES") : "nunca";
+    html += '<div style="background:#eaf5ea;border:1px solid #b5d9b5;border-radius:8px;padding:12px;margin-top:14px">'+
+      '<div style="font-weight:700;font-size:14px;color:#1c6b1c;margin-bottom:4px">🌐 Descargar polígonos del servidor</div>'+
+      '<div style="font-size:12px;color:#1c6b1c;margin-bottom:10px">Descarga las parcelas georreferenciadas de la base de datos. Se guardan localmente para trabajar offline.</div>'+
+      '<div style="font-size:11px;color:#5b6467;margin-bottom:8px">Última descarga: '+tsTxt+'</div>'+
+      '<div style="text-align:right"><button class="btn btn-guardar" style="flex:none;padding:10px 16px;font-size:13px;background:#2e7d32" onclick="descargarPoligonosServidor()">Descargar del servidor</button></div>'+
+    '</div>';
+
+    // 4. Cargar KMZ (fallback manual)
+    html += '<div style="margin-top:14px;padding-top:14px;border-top:1px dashed #d5dad8">';
+    html += '<div style="font-size:11px;color:#8a9299;margin-bottom:6px">Alternativa manual (fallback):</div>';
+    html += '<label style="font-size:13px;color:#5b6467">Cargar KMZ / KML / GeoJSON<input type="file" id="fkmz" style="width:100%;padding:10px;border:1px solid #d5dad8;border-radius:6px;margin-top:6px;font-size:14px"></label>';
+    html += '<div style="text-align:right;margin-top:8px"><button class="btn btn-guardar" style="flex:none;padding:10px 16px;font-size:13px" onclick="cargarArchivo()">Cargar mapa</button></div>';
+    html += '</div>';
+
+    // 4b. IMPORTAR MUESTREO desde Excel
+    html += '<div style="background:#eef4fc;border:1px solid #b8d3ee;border-radius:8px;padding:12px;margin-top:14px">'+
+      '<div style="font-weight:700;font-size:14px;color:#1b5e9e;margin-bottom:4px">📥 Importar muestreo desde Excel</div>'+
+      '<div style="font-size:12px;color:#1b5e9e;margin-bottom:10px">Carga un Excel exportado previamente. Los muestreos importados se archivan directamente en el histórico (no aparecen en Resumen/Mapa del plaguero).</div>'+
+      '<label style="font-size:12px;color:#5b6467">Archivo Excel (formato exportado por la app)<input type="file" id="fmuestreo" accept=".xlsx" style="width:100%;padding:10px;border:1px solid #d5dad8;border-radius:6px;margin-top:6px;font-size:14px"></label>'+
+      '<div style="text-align:right;margin-top:8px"><button class="btn btn-guardar" style="flex:none;padding:10px 16px;font-size:13px;background:#1b5e9e" onclick="importarMuestreoExcel()">Importar</button></div>'+
+    '</div>';
+
+    // 4c. EXPLORAR DATOS (histórico + filtros)
+    const totalMs = muestreos().length;
+    if(totalMs > 0){
+      html += '<div style="background:#faf7ef;border:1px solid #e0d7bf;border-radius:8px;padding:12px;margin-top:14px">'+
+        '<div style="font-weight:700;font-size:14px;color:#7a5230;margin-bottom:8px">🔍 Explorar datos históricos</div>'+
+        '<div style="font-size:12px;color:#7a5230;margin-bottom:10px"><b>' + totalMs + '</b> muestreo(s) guardados en total</div>'+
+        // Filtros
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">'+
+          '<label style="font-size:11px;color:#5b6467">Parcela<select id="filt-parc" onchange="renderExplorar()" style="width:100%;padding:8px;border:1px solid #d5dad8;border-radius:6px;margin-top:4px;font-size:13px"></select></label>'+
+          '<label style="font-size:11px;color:#5b6467">Estado<select id="filt-est" onchange="renderExplorar()" style="width:100%;padding:8px;border:1px solid #d5dad8;border-radius:6px;margin-top:4px;font-size:13px"><option value="">Todos</option><option value="finalizado">Finalizados</option><option value="en_curso">En curso</option></select></label>'+
+        '</div>'+
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">'+
+          '<label style="font-size:11px;color:#5b6467">Desde<input type="date" id="filt-desde" onchange="renderExplorar()" style="width:100%;padding:8px;border:1px solid #d5dad8;border-radius:6px;margin-top:4px;font-size:13px"></label>'+
+          '<label style="font-size:11px;color:#5b6467">Hasta<input type="date" id="filt-hasta" onchange="renderExplorar()" style="width:100%;padding:8px;border:1px solid #d5dad8;border-radius:6px;margin-top:4px;font-size:13px"></label>'+
+        '</div>'+
+        // Lista compacta
+        '<div id="explorar-lista" style="max-height:280px;overflow-y:auto;background:#fff;border:1px solid #d5dad8;border-radius:6px;margin-bottom:10px"></div>'+
+        // Botones de descarga contextuales
+        '<div id="explorar-descargas" style="display:flex;flex-direction:column;gap:6px"></div>'+
+      '</div>';
+    }
+
+    // 5. Acciones destructivas
+    html += '<div style="margin-top:20px;padding-top:14px;border-top:1px solid #eee;display:flex;flex-direction:column;gap:8px">';
+    if(nPoli > 0) html += '<button class="btn btn-s" onclick="borrarPoli()">Borrar mapas cargados</button>';
+    if(nTiles > 0) html += '<button class="btn btn-s" onclick="vaciarCachePrecarga()">Borrar mapas offline</button>';
+    if(nSac > 0) html += '<button class="btn btn-s" onclick="borrarSacHoy()">Borrar datos de hoy</button>';
+    if(nSac > 0) html += '<button class="btn btn-s" style="color:#b3261e" onclick="resetTotal()">RESET TOTAL</button>';
+    html += '</div>';
+
+    html += '</div>';
+
+    // 6. Volver
+    html += '<div class="acc-guardar"><button class="btn btn-s" onclick="ir(\'sac\')">← Volver a Sacudir</button></div>';
+
+    document.getElementById("admin-content").innerHTML = html;
+
+    // Rellenar filtros del explorador si existe
+    const selP = document.getElementById("filt-parc");
+    if(selP){
+      const codigos = [...new Set(muestreos().map(m => m.parcela))].sort();
+      selP.innerHTML = '<option value="">Todas</option>' + codigos.map(c => '<option value="'+c+'">'+c+'</option>').join('');
+      renderExplorar();
+    }
+  });
+}
+
+function renderExplorar(){
+  const contLista = document.getElementById("explorar-lista");
+  const contBotones = document.getElementById("explorar-descargas");
+  if(!contLista || !contBotones) return;
+
+  const filtParc = document.getElementById("filt-parc").value;
+  const filtEst = document.getElementById("filt-est").value;
+  const filtDesde = document.getElementById("filt-desde").value;
+  const filtHasta = document.getElementById("filt-hasta").value;
+
+  let ms = muestreos();
+  if(filtParc) ms = ms.filter(m => m.parcela === filtParc);
+  if(filtEst === "finalizado") ms = ms.filter(m => m.status === "finalizado");
+  if(filtEst === "en_curso") ms = ms.filter(m => m.status !== "finalizado");
+  if(filtDesde) ms = ms.filter(m => (m.fecha_inicio || "").slice(0,10) >= filtDesde);
+  if(filtHasta) ms = ms.filter(m => (m.fecha_inicio || "").slice(0,10) <= filtHasta);
+
+  // Ordenar por fecha desc
+  ms.sort((a,b) => (b.fecha_inicio || "").localeCompare(a.fecha_inicio || ""));
+
+  // Lista compacta
+  if(ms.length === 0){
+    contLista.innerHTML = '<div style="padding:20px;text-align:center;color:#8b9295;font-size:12px">Ningún muestreo con esos filtros</div>';
+  } else {
+    let html = '<table style="width:100%;font-size:12px;border-collapse:collapse">';
+    html += '<thead style="position:sticky;top:0;background:#f7f9f8"><tr>'+
+      '<th style="padding:6px 8px;text-align:left;font-size:10px;color:#5b6467;border-bottom:1px solid #d5dad8">FECHA</th>'+
+      '<th style="padding:6px 4px;text-align:left;font-size:10px;color:#5b6467;border-bottom:1px solid #d5dad8">PARC.</th>'+
+      '<th style="padding:6px 4px;text-align:right;font-size:10px;color:#5b6467;border-bottom:1px solid #d5dad8">SAC.</th>'+
+      '<th style="padding:6px 4px;text-align:left;font-size:10px;color:#5b6467;border-bottom:1px solid #d5dad8">ESTADO</th>'+
+      '<th style="padding:6px 4px;font-size:10px;color:#5b6467;border-bottom:1px solid #d5dad8"></th>'+
+    '</tr></thead><tbody>';
+    ms.forEach(m => {
+      const sacs = sacudidasDeMuestreo(m.id);
+      const fecha = new Date(m.fecha_inicio).toLocaleString("es-ES",{day:"2-digit",month:"2-digit",year:"2-digit",hour:"2-digit",minute:"2-digit"});
+      let estTxt, colEst;
+      if(m.archivado){
+        estTxt = "📦 archivado";
+        colEst = "#8b9295";
+      } else if(m.status === "finalizado"){
+        estTxt = "✓ finalizado";
+        colEst = "#0b6e4f";
+      } else {
+        estTxt = "○ en curso";
+        colEst = "#b8771a";
+      }
+      const opacidad = m.archivado ? "opacity:0.75;" : "";
+      html += '<tr style="border-bottom:1px solid #f0f0ee;'+opacidad+'">'+
+        '<td style="padding:6px 8px">'+fecha+'</td>'+
+        '<td style="padding:6px 4px"><b>'+m.parcela+'</b></td>'+
+        '<td style="padding:6px 4px;text-align:right">'+sacs.length+'</td>'+
+        '<td style="padding:6px 4px;color:'+colEst+';font-size:11px">'+estTxt+'</td>'+
+        '<td style="padding:6px 4px;text-align:right;white-space:nowrap">'+
+          '<button style="padding:3px 6px;font-size:10px;background:#fff;border:1px solid #d5dad8;border-radius:4px;cursor:pointer" onclick="generarPDFMuestreo(\''+m.id+'\')">📄</button> '+
+          '<button style="padding:3px 6px;font-size:10px;background:#fff;border:1px solid #d5dad8;border-radius:4px;cursor:pointer" onclick="exportarExcelDeMuestreo(\''+m.id+'\')">📊</button>'+
+        '</td>'+
+      '</tr>';
+    });
+    html += '</tbody></table>';
+    contLista.innerHTML = html;
+  }
+
+  // Botones contextuales de descarga
+  let botones = '';
+  if(ms.length > 0){
+    let sufijo = "FILTRO_" + new Date().toISOString().slice(0,10);
+    let etiqueta = "Descargar Excel de estos " + ms.length + " muestreos";
+    if(filtParc && !filtEst && !filtDesde && !filtHasta){
+      etiqueta = "Descargar Excel completo de " + filtParc + " (" + ms.length + ")";
+      sufijo = filtParc + "_TODO";
+    } else if(!filtParc && !filtEst && !filtDesde && !filtHasta){
+      etiqueta = "Descargar Excel completo (todo, " + ms.length + " muestreos)";
+      sufijo = "COMPLETO_" + new Date().toISOString().slice(0,10);
+    }
+    const idsStr = ms.map(m => m.id).join(",");
+    botones = '<button class="btn btn-guardar" style="padding:10px;font-size:13px" onclick="descargarExcelFiltrado(\''+idsStr+'\', \''+sufijo+'\')">'+etiqueta+'</button>';
+  }
+  contBotones.innerHTML = botones;
+}
+
+function descargarExcelFiltrado(idsStr, sufijo){
+  const ids = new Set(idsStr.split(","));
+  const ms = muestreos().filter(m => ids.has(m.id));
+  exportarExcelFiltrado(ms, sufijo);
+}
+
+// Compatibilidad: la función antigua ahora redirige a la pestaña
+function abrirAdmin(){ ir('admin'); }
+function mostrarAdmin(){ ir('admin'); }
+function checkPin(){ checkPinTab(); }
+
+function guardarPlaguero(){
+  const el = document.getElementById("f-plaguero");
+  if(!el){ aviso("Campo no encontrado"); return; }
+  const v = el.value.trim();
+  if(!v){
+    if(!confirm("¿Dejar el nombre de plaguero vacío?")) return;
+  }
+  localStorage.setItem(K_PLAGUERO, v);
+  aviso(v ? "✓ Nombre guardado: " + v : "Nombre borrado");
+  renderAdminContent(); // refresca para mostrar el nuevo estado
+}
+
+// ============ v24: DESCARGA / SELECCIÓN DE FINCA ============
+async function descargarFincas(){
+  try{
+    aviso("Descargando fincas y catálogo del servidor central...");
+    const fincas = await descargarFincasDesdeSupabase();
+    const catalogo = await descargarCatalogoDesdeSupabase();
+    aviso("✓ " + fincas.length + " fincas + " + catalogo.length + " plagas descargadas correctamente");
+    render(); // refresca UI si estaba bloqueada por catálogo vacío
+    renderAdminContent();
+  } catch(e){
+    console.error(e);
+    aviso("✗ Error descargando: " + e.message);
+  }
+}
+
+function guardarFincaActiva(){
+  const sel = document.getElementById("f-finca-activa");
+  if(!sel){ aviso("Selector no encontrado"); return; }
+  const id = sel.value;
+  if(!id){
+    if(!confirm("¿Quieres dejar la app SIN finca activa? Los muestreos no se sincronizarán.")) return;
+    localStorage.removeItem(K_FINCA_ACTIVA);
+    actualizarCabeceraFinca();
+    aviso("✗ Sin finca activa");
+    renderAdminContent();
+    return;
+  }
+  localStorage.setItem(K_FINCA_ACTIVA, id);
+  actualizarCabeceraFinca();
+  const f = fincaActiva();
+  aviso("✓ Finca activa guardada: " + f.nombre_completo);
+  renderAdminContent(); // refresca para mostrar la nueva finca activa
+}
+
+// Compatibilidad con versiones anteriores (por si hay onchange antiguo)
+function cambiarFincaActiva(){ guardarFincaActiva(); }
+
+function cargarArchivo(){
+  const f = document.getElementById("fkmz").files[0];
+  if(!f){ aviso("Elige un archivo"); return; }
+  const nombre = f.name.toLowerCase();
+  if(nombre.endsWith(".kmz")){
+    const r = new FileReader();
+    r.onload = e => {
+      JSZip.loadAsync(e.target.result).then(zip => {
+        const kml = Object.keys(zip.files).find(k => k.toLowerCase().endsWith(".kml"));
+        if(!kml){ aviso("El KMZ no contiene KML"); return; }
+        zip.files[kml].async("string").then(procesarKML);
+      });
+    };
+    r.readAsArrayBuffer(f);
+  } else if(nombre.endsWith(".kml")){
+    const r = new FileReader();
+    r.onload = e => procesarKML(e.target.result);
+    r.readAsText(f);
+  } else {
+    const r = new FileReader();
+    r.onload = e => procesarGeoJSON(e.target.result);
+    r.readAsText(f);
+  }
+}
+
+function procesarKML(txt){
+  const doc = new DOMParser().parseFromString(txt, "application/xml");
+  const placemarks = doc.getElementsByTagName("Placemark");
+  const nuevos = {};
+  for(let i=0;i<placemarks.length;i++){
+    const pm = placemarks[i];
+    let nombre = "";
+    const nName = pm.getElementsByTagName("name")[0];
+    if(nName) nombre = nName.textContent.trim();
+    const coordsNode = pm.querySelector("Polygon outerBoundaryIs LinearRing coordinates");
+    if(!coordsNode || !nombre) continue;
+    const coords = coordsNode.textContent.trim().split(/\s+/).map(t => {
+      const p = t.split(",");
+      const lon = parseFloat(p[0]), lat = parseFloat(p[1]);
+      return (isFinite(lon) && isFinite(lat)) ? [lon, lat] : null;
+    }).filter(x => x);
+    if(coords.length >= 3) nuevos[nombre] = coords;
+  }
+  guardarPoligonos(nuevos);
+}
+
+function procesarGeoJSON(txt){
+  try{
+    const gj = JSON.parse(txt);
+    const nuevos = {};
+    (gj.features || []).forEach(f => {
+      const nom = (f.properties && (f.properties.name || f.properties.NOMBRE || f.properties.codigo)) || null;
+      if(!nom) return;
+      const g = f.geometry;
+      if(g.type === "Polygon"){
+        nuevos[nom] = g.coordinates[0];
+      }
+    });
+    guardarPoligonos(nuevos);
+  }catch(e){ aviso("Error en GeoJSON: "+e.message); }
+}
+
+// ============================================================
+// DESCARGA DE POLÍGONOS DESDE SERVIDOR (v25a)
+// ============================================================
+// Descarga las parcelas con geometría desde Supabase y las convierte
+// al formato interno que usa la app (mismo que produce el KMZ).
+// Formato interno: { "ALIA1": [[lon,lat],[lon,lat],...], "ALIA30": [...] }
+async function descargarPoligonosServidor(){
+  const btn = event.target;
+  const textoOriginal = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Descargando...";
+  try{
+    // 1. Descargar todas las parcelas con geometría (todas las fincas)
+    // Supabase con PostGIS devuelve geometría como GeoJSON string
+    const parcelas = await supabaseGet(
+      "parcelas",
+      "select=codigo,finca_id,geometria&geometria=not.is.null"
+    );
+    if(!parcelas || parcelas.length === 0){
+      aviso("El servidor no tiene polígonos disponibles todavía");
+      return;
+    }
+    // 2. Convertir formato Supabase (GeoJSON) al formato interno de la app
+    const nuevos = {};
+    let saltadas = 0;
+    parcelas.forEach(p => {
+      try{
+        // geometria puede venir como objeto GeoJSON o como string
+        const geo = (typeof p.geometria === "string") ? JSON.parse(p.geometria) : p.geometria;
+        if(geo && geo.type === "Polygon" && Array.isArray(geo.coordinates) && geo.coordinates.length > 0){
+          // GeoJSON Polygon: coordinates[0] es el anillo exterior [[lon,lat],...]
+          nuevos[p.codigo] = geo.coordinates[0];
+        } else {
+          saltadas++;
+        }
+      } catch(e){
+        saltadas++;
+      }
+    });
+    if(Object.keys(nuevos).length === 0){
+      aviso("Los polígonos del servidor no tienen formato válido");
+      return;
+    }
+    // 3. Guardar en localStorage (reutiliza la función existente)
+    // Marca timestamp para saber cuándo fue la última descarga
+    POLIGONOS = nuevos;
+    localStorage.setItem(K_POLIGONOS, JSON.stringify(POLIGONOS));
+    localStorage.setItem("monitoreo.poligonos_ts", Date.now().toString());
+    const n = Object.keys(nuevos).length;
+    const msg = n + " parcelas descargadas del servidor" + (saltadas > 0 ? " (" + saltadas + " saltadas por formato)" : "");
+    aviso(msg);
+    render();
+    if(S.admin) renderAdminContent();
+    // Ofrecer preparar mapas offline como en la carga KMZ
+    setTimeout(() => {
+      if(confirm("¿Preparar los mapas para trabajar sin conexión ahora?\n\nEs recomendable si vas a salir al campo con la tablet.")){
+        abrirPrecarga();
+      }
+    }, 400);
+  } catch(e){
+    console.error("Error descargando polígonos:", e);
+    aviso("Error al descargar: " + (e.message || e));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = textoOriginal;
+  }
+}
+
+function guardarPoligonos(nuevos){
+  const n = Object.keys(nuevos).length;
+  if(n === 0){ aviso("No se han encontrado polígonos"); return; }
+  const yaHay = Object.keys(POLIGONOS).length > 0;
+  if(yaHay && !confirm("Ya hay "+Object.keys(POLIGONOS).length+" parcelas cargadas. ¿Reemplazar por las "+n+" nuevas?")) return;
+  POLIGONOS = nuevos;
+  localStorage.setItem(K_POLIGONOS, JSON.stringify(POLIGONOS));
+  aviso(n+" parcelas cargadas");
+  render();
+  if(S.admin) renderAdminContent();
+  // Preguntar si quiere preparar mapas offline ahora mismo
+  setTimeout(() => {
+    if(confirm("¿Preparar los mapas para trabajar sin conexión ahora?\n\nEs recomendable si vas a salir al campo con la tablet.")){
+      abrirPrecarga();
+    }
+  }, 300);
+}
+
+function borrarPoli(){
+  if(!confirm("¿Borrar todos los mapas cargados? Las sacudidas guardadas se mantienen.")) return;
+  POLIGONOS = {};
+  localStorage.removeItem(K_POLIGONOS);
+  aviso("Mapas borrados");
+  render();
+  if(S.admin) renderAdminContent();
+}
+
+function borrarSacHoy(){
+  const nHoy = sacudidasHoy().length;
+  if(!nHoy){ aviso("No hay sacudidas de hoy"); return; }
+  if(!confirm("¿Borrar TODAS las sacudidas de hoy y sus muestreos? No se pueden recuperar.")) return;
+  const hoy = new Date().toISOString().slice(0,10);
+  const restantes = sacudidas().filter(s => s.fecha.slice(0,10) !== hoy);
+  const idsHoy = new Set(sacudidasHoy().map(s => s.muestreo_id));
+  const msRestantes = muestreos().filter(m => !idsHoy.has(m.id));
+  localStorage.setItem(K_SAC, JSON.stringify(restantes));
+  guardarMuestreos(msRestantes);
+  aviso(nHoy+" sacudidas borradas");
+  S.muestreoActivo = null;
+  render();
+  if(S.admin) renderAdminContent();
+}
+
+function resetTotal(){
+  if(!confirm("RESET TOTAL. Se borra TODO: sacudidas, muestreos, mapas, configuración. ¿Seguir?")) return;
+  if(!confirm("Segunda confirmación. Esto es irreversible. ¿Confirmar?")) return;
+  Object.keys(localStorage).filter(k => k.startsWith("sac_")).forEach(k => localStorage.removeItem(k));
+  aviso("Todo borrado. Recargando…");
+  setTimeout(() => location.reload(), 800);
+}
+
+// ============ UTILIDADES ============
+function cerrar(){ document.getElementById("velo").classList.remove("on"); }
+function aviso(msg){
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("on");
+  setTimeout(() => t.classList.remove("on"), 2400);
+}
+
+// modal de confirmación integrado (reutilizable)
+// opciones: { titulo, mensaje (html permitido), opciones: [{texto, color, accion}] }
+function modalConfirmar(opts){
+  // Eliminar cualquier modal previo
+  const prev = document.getElementById("modal-confirmar");
+  if(prev) prev.remove();
+  const velo = document.createElement("div");
+  velo.id = "modal-confirmar";
+  velo.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px";
+  let botones = "";
+  (opts.opciones || []).forEach((op, idx) => {
+    const color = op.color || "#0b6e4f";
+    botones += '<button data-idx="'+idx+'" style="display:block;width:100%;padding:12px 14px;margin-top:8px;background:'+color+';color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">'+op.texto+'</button>';
+  });
+  velo.innerHTML =
+    '<div style="background:#fff;border-radius:12px;padding:20px;max-width:420px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,0.3)">'+
+      '<div style="font-size:16px;font-weight:700;color:#14181a;margin-bottom:10px">'+(opts.titulo || "Confirmar")+'</div>'+
+      '<div style="font-size:13px;color:#5b6467;line-height:1.5;margin-bottom:14px">'+(opts.mensaje || "")+'</div>'+
+      botones +
+    '</div>';
+  document.body.appendChild(velo);
+  // Handlers
+  velo.querySelectorAll("button[data-idx]").forEach(btn => {
+    btn.onclick = () => {
+      const idx = parseInt(btn.dataset.idx);
+      velo.remove();
+      const accion = opts.opciones[idx] && opts.opciones[idx].accion;
+      if(typeof accion === "function") accion();
+    };
+  });
+  // Cerrar con click en fondo (equivale a Cancelar sin acción)
+  velo.onclick = (e) => {
+    if(e.target === velo) velo.remove();
+  };
+}
+
+// ============ ARRANQUE ============
+function pintarRed(){
+  const c = document.getElementById("chip-red");
+  if(!c) return;
+  if(navigator.onLine){
+    c.textContent = "Online";
+    c.className = "chip ok";
+    c.style.background = "";
+    c.style.color = "";
+    c.style.border = "";
+    c.style.animation = "";
+  } else {
+    // MUY visible cuando sin conexión
+    c.textContent = "🔴 Sin conexión";
+    c.className = "chip mal";
+    c.style.background = "#c33";
+    c.style.color = "#fff";
+    c.style.border = "1.5px solid #a02020";
+    c.style.fontWeight = "700";
+    c.style.animation = "pulseRed 2s infinite";
+  }
+}
+window.addEventListener("online", function(){ pintarRed(); renderListaParcelas(); });
+window.addEventListener("offline", function(){ pintarRed(); renderListaParcelas(); });
+pintarRed();
+
+init();
+console.log("%c✔ Sacudidas v22 OK", "color:#0b6e4f;font-weight:bold;font-size:14px");
+
+// ============ SERVICE WORKER (v24h.2: cache-first offline + auto-update) ============
+// Registra sw.js del mismo directorio.
+// Aviso al usuario cuando la app queda lista para trabajar offline.
+// Aviso amarillo al detectar nueva versión (con botón "Recargar").
+if("serviceWorker" in navigator){
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js")
+      .then(reg => {
+        console.log("SW registrado, scope:", reg.scope);
+        // Si es la primera instalación (nunca hubo controller antes)
+        if(!navigator.serviceWorker.controller){
+          // Escuchamos cuando termine de cachear
+          if(reg.active){
+            avisoOfflineListo();
+          } else if(reg.installing){
+            reg.installing.addEventListener("statechange", (e) => {
+              if(e.target.state === "activated") avisoOfflineListo();
+            });
+          }
+        }
+        // Detectar actualizaciones futuras
+        reg.addEventListener("updatefound", () => {
+          const nuevo = reg.installing;
+          if(!nuevo) return;
+          nuevo.addEventListener("statechange", () => {
+            if(nuevo.state === "installed" && navigator.serviceWorker.controller){
+              // Ya había versión anterior + hay una nueva instalada = update disponible
+              mostrarBannerActualizacion();
+            }
+          });
+        });
+        // Comprobar actualizaciones cada 30 min mientras la app está abierta
+        setInterval(() => { reg.update().catch(() => {}); }, 30 * 60 * 1000);
+      })
+      .catch(err => {
+        console.log("SW no registrado:", err);
+      });
+    // Cuando el SW nuevo toma control tras recarga -> refrescar
+    let refrescando = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if(refrescando) return;
+      refrescando = true;
+      window.location.reload();
+    });
+  });
+}
+
+function avisoOfflineListo(){
+  // Aviso verde discreto 5 seg: "App lista para funcionar sin conexión"
+  const div = document.createElement("div");
+  div.style.cssText = "position:fixed;top:70px;left:50%;transform:translateX(-50%);background:#0b6e4f;color:#fff;padding:10px 16px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.3);z-index:9998;font-size:13px;font-weight:600;max-width:90%;text-align:center";
+  div.innerHTML = "✓ App lista para trabajar sin conexión";
+  document.body.appendChild(div);
+  setTimeout(() => { div.style.transition = "opacity 0.5s"; div.style.opacity = "0"; }, 4500);
+  setTimeout(() => { div.remove(); }, 5000);
+}
+
+function mostrarBannerActualizacion(){
+  // Banner amarillo fijo arriba con botón "Recargar"
+  if(document.getElementById("banner-actualizacion")) return;
+  const div = document.createElement("div");
+  div.id = "banner-actualizacion";
+  div.style.cssText = "position:fixed;top:0;left:0;right:0;background:#f4c430;color:#5b4600;padding:10px 14px;z-index:99997;display:flex;justify-content:center;align-items:center;gap:12px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,0.2)";
+  div.innerHTML = '<span>🔄 Nueva versión disponible</span>'+
+    '<button onclick="aplicarActualizacion()" style="background:#5b4600;color:#fff;border:none;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700">Recargar ahora</button>'+
+    '<button onclick="document.getElementById(\'banner-actualizacion\').remove()" style="background:transparent;color:#5b4600;border:1px solid #5b4600;padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px">Después</button>';
+  document.body.appendChild(div);
+}
+
+function aplicarActualizacion(){
+  navigator.serviceWorker.getRegistration().then(reg => {
+    if(reg && reg.waiting){
+      reg.waiting.postMessage({type: "SKIP_WAITING"});
+      // El controllerchange dispara el reload
+    } else {
+      // Fallback: recarga directa
+      window.location.reload();
+    }
+  });
+}
+
+</script>
+</body>
+</html>
