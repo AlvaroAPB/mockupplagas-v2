@@ -23,32 +23,43 @@
   Autor: Álvaro Parra Bocccoli
 
   ----------------------------------------------------------------------------
-  VERSIÓN v25b (fork experimental)
+  VERSIÓN v25c (fork experimental)
   ----------------------------------------------------------------------------
-  Nuevo respecto a v24i:
-    - Descarga de polígonos desde Supabase (Admin > "Descargar del servidor").
-    - Requiere columna 'geometria' (PostGIS) en la tabla 'parcelas'.
-    - Devuelto por Supabase como GeoJSON, se transforma al formato interno.
-    - Timestamp de última descarga persistido en 'monitoreo.poligonos_ts'.
-    - Se conserva "Cargar KMZ" como fallback manual (por si servidor caído).
+  Cambios respecto a v25b:
 
-  Fix respecto a v25a:
-    - BUG 1 (coherencia finca+parcela): al descargar del servidor, cada polígono
-      guarda su finca_id en 'monitoreo.poligonos_meta'. El selector de parcela,
-      el mapa, la detección GPS y el reencuadre ahora filtran por finca activa.
-      Ya no aparecen parcelas de otras fincas mezcladas.
-    - BUG 2 (descarga de tiles offline desproporcionada): la precarga offline
-      calcula el bounding box SOLO de la finca activa, no de todos los polígonos
-      cargados. Antes con fincas dispersas (Sevilla + Huelva) se descargaban
-      cientos de miles de tiles de la zona intermedia. Ahora solo la finca.
-    - BUG 3 (mapa no se reencuadra al cambiar de finca): el mapa Leaflet
-      conserva su estado entre navegaciones. Al cambiar de finca activa y
-      volver al mapa, seguía centrado en la finca anterior. Ahora detecta
-      cambio de finca_id y fuerza fitBounds automáticamente.
+  1) FLUJO REORGANIZADO en Admin (mapa por finca):
+     - Bloque "Mapa de la finca activa" → botón "Descargar mapa del servidor"
+       que descarga SOLO los polígonos de la finca seleccionada.
+     - Bloque "Imágenes de satélite offline" → depende del anterior.
+     - Bloque "Opciones avanzadas" (colapsable): descargar TODAS las fincas
+       de golpe + carga manual de KMZ. Sigue disponible pero fuera del flujo
+       principal, para no confundir al usuario.
 
-  Retrocompatibilidad:
-    - KMZ manual sigue funcionando (no trae finca_id, se muestra todo).
-    - Datos antiguos de v24i/v25a se cargan sin problema.
+  2) AVISO AUTOMÁTICO al elegir finca:
+     - Al guardar finca activa, si esa finca NO tiene polígonos descargados,
+       aparece modal: "¿Descargar el mapa ahora?".
+     - Guiado natural del flujo de configuración inicial.
+
+  3) BUG 3 REALMENTE ARREGLADO (mapa no reencuadraba al cambiar finca):
+     - Al guardar finca activa, se limpia MAPA.ultimaFincaId.
+     - Si la vista Mapa está visible, se re-renderiza inmediatamente.
+     - Sino, el próximo pintarMapaGrande() detectará el cambio y reencuadrará.
+
+  4) MODALES ESTILIZADOS EN VEZ DE confirm() NATIVO:
+     - 19 confirms del navegador reemplazados por función pregunta() con
+       modal integrado que respeta el diseño de la app.
+     - Ya no aparece "alvaroapb.github.io dice" — se ven cuadros nativos
+       de la app con botones etiquetados según acción (Borrar, Reemplazar,
+       Continuar, etc.).
+     - Nueva función alerta() para avisos con un solo botón.
+
+  5) DESCARGA POLÍGONOS: NO destructiva (MERGE en vez de REPLACE):
+     - Descargar TEJITA no borra los polígonos de ALIA ya descargados.
+     - Se acumulan por finca según se van descargando.
+
+  Compatibilidad:
+    - KMZ manual sigue funcionando en "Opciones avanzadas".
+    - Datos antiguos de v24i/v25a/v25b se cargan sin problema.
   ============================================================================
 -->
 <html lang="es">
@@ -63,7 +74,7 @@
 <link rel="manifest" href="./manifest.json">
 <link rel="apple-touch-icon" href="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='24' fill='%230b6e4f'/%3E%3Ctext x='96' y='132' font-family='sans-serif' font-size='110' font-weight='700' text-anchor='middle' fill='%23fff'%3EM%3C/text%3E%3C/svg%3E">
 <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="10" fill="%230b6e4f"/><text x="32" y="45" font-family="sans-serif" font-size="38" font-weight="700" text-anchor="middle" fill="%23fff">S</text></svg>'>
-<title>Monitoreo de plagas · v25b</title>
+<title>Monitoreo de plagas · v25c</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -184,7 +195,7 @@ td b{color:#0b6e4f}
     <button class="chip" id="chip-red">Red</button>
     <button class="chip" id="chip-gps" onclick="pedirGPS()">📍 Activar GPS</button>
   </div>
-  <div style="position:absolute;bottom:2px;right:6px;font-size:8px;color:rgba(255,255,255,0.45);font-weight:500;letter-spacing:0.3px">v25b</div>
+  <div style="position:absolute;bottom:2px;right:6px;font-size:8px;color:rgba(255,255,255,0.45);font-weight:500;letter-spacing:0.3px">v25c</div>
 </header>
 
 <div class="tabs">
@@ -382,7 +393,7 @@ const RAZONES_FIN = [
 const K_SAC = "monitoreo.sacudidas";
 const K_MUESTREOS = "monitoreo.muestreos";
 const K_POLIGONOS = "monitoreo.poligonos";
-const K_POLIGONOS_META = "monitoreo.poligonos_meta";  // v25b: metadata (finca_id) por parcela
+const K_POLIGONOS_META = "monitoreo.poligonos_meta";  // v25c: metadata (finca_id) por parcela
 const K_PLAGUERO = "monitoreo.plaguero";
 const K_FINCAS = "monitoreo.fincas";           // Cache local de fincas (desde Supabase)
 const K_FINCA_ACTIVA = "monitoreo.finca_activa";   // ID de la finca activa
@@ -641,7 +652,7 @@ let PRECARGA = {activa: false, cancelar: false};
 
 // ============ PRECARGA OFFLINE ============
 async function abrirPrecarga(){
-  // v25b: usar solo polígonos de la finca activa para no descargar
+  // v25c: usar solo polígonos de la finca activa para no descargar
   // tiles de zonas intermedias entre fincas dispersas geográficamente.
   const poliActivos = poligonosDeFincaActiva();
   if(Object.keys(poliActivos).length === 0){
@@ -682,7 +693,7 @@ function calcularTiles(){
   const s = document.getElementById("f-zoom");
   if(!s) return;
   const zMax = parseInt(s.value, 10);
-  // v25b: solo tiles de la finca activa
+  // v25c: solo tiles de la finca activa
   const tiles = tilesParaPoligonos(poligonosDeFincaActiva(), 15, zMax);
   const mbAprox = (tiles.length * 40 / 1024).toFixed(1);
   const p = document.getElementById("prev-tiles");
@@ -694,7 +705,7 @@ function calcularTiles(){
 async function lanzarPrecarga(){
   if(PRECARGA.activa) return;
   const zoomMax = parseInt(document.getElementById("f-zoom").value, 10);
-  // v25b: solo tiles de la finca activa (no descarga zonas intermedias)
+  // v25c: solo tiles de la finca activa (no descarga zonas intermedias)
   const tiles = tilesParaPoligonos(poligonosDeFincaActiva(), 15, zoomMax);
   if(!tiles.length){ aviso("No hay tiles que descargar"); return; }
 
@@ -769,7 +780,8 @@ function cancelarPrecarga(){
 }
 
 async function vaciarCachePrecarga(){
-  if(!confirm("¿Borrar las imágenes offline guardadas? Tendrás que volver a descargarlas.")) return;
+  const ok = await pregunta("Borrar mapas offline", "¿Borrar las imágenes offline guardadas? Tendrás que volver a descargarlas.", {tipo:"peligro", textoOK:"Borrar"});
+  if(!ok) return;
   try{
     await idbClear();
     aviso("Caché offline vaciada");
@@ -783,7 +795,7 @@ let S = {
   parcelaDetectada:null, muestreoActivo:null, razonSel:null, gpsWatchId:null
 };
 let POLIGONOS = {};
-// v25b: metadata por parcela (finca_id, etc.). Clave: mismo código que POLIGONOS.
+// v25c: metadata por parcela (finca_id, etc.). Clave: mismo código que POLIGONOS.
 // Formato: { "ALIA1": { finca_id: 1 }, "TEJ3": { finca_id: 11 }, ... }
 let POLIGONOS_META = {};
 let MAPA = {mini:null, grande:null, capaPoli:null, capaGPS:null, puntos:null,
@@ -822,7 +834,7 @@ function cargarPoligonos(){
   }catch(e){ POLIGONOS_META = {}; }
 }
 
-// v25b: devuelve solo los polígonos que pertenecen a la finca activa.
+// v25c: devuelve solo los polígonos que pertenecen a la finca activa.
 // Formato de retorno: mismo que POLIGONOS ({ "ALIA1": [[lon,lat],...] }) para
 // compatibilidad con el resto del código que ya trabaja con ese formato.
 // Si no hay finca activa o los polígonos no tienen metadata, devuelve TODOS
@@ -847,7 +859,7 @@ function poligonosDeFincaActiva(){
   return filtrados;
 }
 
-// v25b: cuenta parcelas de la finca activa (para info UI)
+// v25c: cuenta parcelas de la finca activa (para info UI)
 function nPoligonosFincaActiva(){
   return Object.keys(poligonosDeFincaActiva()).length;
 }
@@ -864,7 +876,7 @@ function renderSelectParcela(){
   const s = document.getElementById("sel");
   const val = s.value;
   s.innerHTML = '<option value="">- Elige parcela -</option>';
-  // v25b: solo parcelas de la finca activa (fix bug de coherencia)
+  // v25c: solo parcelas de la finca activa (fix bug de coherencia)
   const poliActivos = poligonosDeFincaActiva();
   const codigos = Object.keys(poliActivos).sort();
   if(codigos.length === 0){
@@ -886,7 +898,7 @@ function renderSelectParcela(){
   if(val && poliActivos[val]) s.value = val;
 }
 
-function cambParc(){
+async function cambParc(){
   const s = document.getElementById("sel");
   S.parcela = s.value || null;
   if(!S.parcela){
@@ -916,7 +928,11 @@ function cambParc(){
     } else {
       // Muestreo abierto de días anteriores → preguntar
       const fechaTxt = new Date(ultimo.fecha_inicio).toLocaleDateString("es-ES",{day:"2-digit",month:"2-digit"});
-      const seguir = confirm("Tienes un muestreo abierto en " + S.parcela + " desde el " + fechaTxt + " con " + ultimo.sacudidas_count + " sacudidas.\n\nAceptar = continuar ese muestreo\nCancelar = empezar uno nuevo");
+      const seguir = await pregunta(
+        "Muestreo antiguo abierto",
+        "Tienes un muestreo abierto en " + S.parcela + " desde el " + fechaTxt + " con " + ultimo.sacudidas_count + " sacudidas.",
+        {textoOK: "Continuar ese muestreo", textoCancel: "Empezar uno nuevo"}
+      );
       if(seguir){
         S.muestreoActivo = ultimo;
       } else {
@@ -961,7 +977,7 @@ function guardarMuestreos(lista){
 }
 
 // ============ FINALIZAR JORNADA (v24e: solo cierra, no envía) ============
-function finalizarJornada(){
+async function finalizarJornada(){
   const activos = muestreosActivos();
   if(activos.length === 0){
     aviso("No hay muestreos que finalizar");
@@ -971,12 +987,13 @@ function finalizarJornada(){
   const enCurso = activos.filter(m => m.status !== "finalizado");
   const finalizados = activos.filter(m => m.status === "finalizado");
 
-  let msg = "Vas a finalizar la jornada.\n\nSe cerrarán:\n";
-  if(enCurso.length) msg += "• " + enCurso.length + " muestreo(s) en curso → se cerrarán y pasarán a 'Pendientes de enviar'\n";
+  let msg = "Se cerrarán:\n";
+  if(enCurso.length) msg += "• " + enCurso.length + " muestreo(s) en curso → pasarán a 'Pendientes de enviar'\n";
   if(finalizados.length) msg += "• " + finalizados.length + " muestreo(s) ya finalizado(s) → pasarán a 'Pendientes de enviar'\n";
-  msg += "\nDespués podrás enviarlos al servidor desde la sección 'Pendientes'.\n\n¿Continuar?";
+  msg += "\nDespués podrás enviarlos al servidor desde la sección 'Pendientes'.";
 
-  if(!confirm(msg)) return;
+  const ok = await pregunta("Finalizar jornada", msg, {textoOK:"Finalizar jornada"});
+  if(!ok) return;
 
   const ahora = new Date().toISOString();
   const plaguero = localStorage.getItem(K_PLAGUERO) || "";
@@ -1344,9 +1361,10 @@ function actualizarBannerFinalizada(){
   }
 }
 
-function reabrirMuestreo(){
+async function reabrirMuestreo(){
   if(!S.muestreoActivo) return;
-  if(!confirm("¿Reabrir este muestreo para añadir más sacudidas?")) return;
+  const ok = await pregunta("Reabrir muestreo", "¿Reabrir este muestreo para añadir más sacudidas?");
+  if(!ok) return;
   const ms = muestreos();
   const idx = ms.findIndex(m => m.id === S.muestreoActivo.id);
   if(idx < 0) return;
@@ -1360,11 +1378,12 @@ function reabrirMuestreo(){
   aviso("Muestreo reabierto");
 }
 
-function reabrirDesdeResumen(muestreoId){
+async function reabrirDesdeResumen(muestreoId){
   const ms = muestreos();
   const idx = ms.findIndex(m => m.id === muestreoId);
   if(idx < 0) return;
-  if(!confirm("¿Reabrir este muestreo de " + ms[idx].parcela + "?\n\nQuedará abierto para añadir más sacudidas.")) return;
+  const ok = await pregunta("Reabrir muestreo", "¿Reabrir este muestreo de " + ms[idx].parcela + "?\n\nQuedará abierto para añadir más sacudidas.");
+  if(!ok) return;
   ms[idx].status = "en_curso";
   ms[idx].fecha_fin = null;
   ms[idx].razon_finalizacion = "";
@@ -1384,9 +1403,10 @@ function reabrirDesdeResumen(muestreoId){
   aviso("Muestreo reabierto. Puedes seguir sacudiendo.");
 }
 
-function empezarNuevoMuestreo(){
+async function empezarNuevoMuestreo(){
   if(!S.parcela) return;
-  if(!confirm("¿Empezar un muestreo NUEVO en " + S.parcela + "?\n\nEl anterior queda como estaba (finalizado) y este empieza desde cero.")) return;
+  const ok = await pregunta("Nuevo muestreo", "¿Empezar un muestreo NUEVO en " + S.parcela + "?\n\nEl anterior queda como estaba (finalizado) y este empieza desde cero.");
+  if(!ok) return;
   const nuevo = crearMuestreo(S.parcela);
   S.muestreoActivo = nuevo;
   render();
@@ -1684,8 +1704,12 @@ function guardarSacAhora(sinCapturas){
 
   // Aviso especial al llegar a 100 sacudidas
   if(numero === 100){
-    setTimeout(() => {
-      const cont = confirm("🎉 ¡Has llegado a 100 sacudidas en " + S.parcela + "!\n\nPuedes seguir añadiendo o pulsar Aceptar para finalizar la parcela ahora.");
+    setTimeout(async () => {
+      const cont = await pregunta(
+        "🎉 100 sacudidas alcanzadas",
+        "¡Has llegado a 100 sacudidas en " + S.parcela + "!\n\nPuedes seguir añadiendo o finalizar la parcela ahora.",
+        {textoOK:"Finalizar parcela", textoCancel:"Seguir sacudiendo"}
+      );
       if(cont) finalizarParcela();
     }, 400);
   }
@@ -1853,7 +1877,7 @@ function puntoEnPoligono(lon, lat, poly){
 function chequearParcelaGPS(){
   if(!S.gps) return;
   let encontrada = null;
-  // v25b: buscar SOLO en parcelas de la finca activa
+  // v25c: buscar SOLO en parcelas de la finca activa
   // (evita detectar parcelas de otras fincas que estén cargadas)
   const poliActivos = poligonosDeFincaActiva();
   Object.entries(poliActivos).forEach(([cod, poly]) => {
@@ -1964,7 +1988,7 @@ function pintarMapaGrande(){
     MAPA.gCapaTiles = crearCapaTiles();
     MAPA.gCapaTiles.addTo(MAPA.grande);
   }
-  // v25b: detectar cambio de finca activa → forzar reencuadre
+  // v25c: detectar cambio de finca activa → forzar reencuadre
   const fA = fincaActiva();
   const fincaActualId = fA ? fA.id : null;
   const cambioFinca = MAPA.ultimaFincaId !== fincaActualId;
@@ -1974,7 +1998,7 @@ function pintarMapaGrande(){
   if(MAPA.gCapaPuntos){ try{ map.removeLayer(MAPA.gCapaPuntos); }catch(e){} }
   if(MAPA.gCapaGPS){ try{ map.removeLayer(MAPA.gCapaGPS); }catch(e){} }
 
-  // v25b: solo mostrar en el mapa los polígonos de la finca activa
+  // v25c: solo mostrar en el mapa los polígonos de la finca activa
   const poliActivos = poligonosDeFincaActiva();
   const parcelas = Object.keys(poliActivos);
   if(parcelas.length === 0){
@@ -2049,7 +2073,7 @@ function pintarMapaGrande(){
     MAPA.gCapaGPS = L.circleMarker([S.gps.lat, S.gps.lon], {radius:8, color:"#fff", weight:2.5, fillColor:"#1b5e9e", fillOpacity:1}).addTo(map);
   }
 
-  // v25b: reencuadrar cuando es primera vez O cuando cambia la finca activa
+  // v25c: reencuadrar cuando es primera vez O cuando cambia la finca activa
   if(bounds.length && (esPrimeraVez || cambioFinca)){
     let all = bounds[0];
     for(let i=1; i<bounds.length; i++) all = all.extend(bounds[i]);
@@ -2067,7 +2091,7 @@ function pintarMapaGrande(){
 // reencuadrar mapa manualmente (para volver a la vista inicial cuando el usuario se ha "perdido" haciendo zoom)
 function reencuadrarMapa(){
   if(!MAPA.grande) return;
-  // v25b: reencuadrar solo sobre la finca activa (evita zoom out excesivo con multi-finca)
+  // v25c: reencuadrar solo sobre la finca activa (evita zoom out excesivo con multi-finca)
   const poliActivos = poligonosDeFincaActiva();
   const parcelas = Object.keys(poliActivos);
   if(parcelas.length === 0) return;
@@ -2342,7 +2366,7 @@ function importarMuestreoExcel(){
   }
   const file = inp.files[0];
   const reader = new FileReader();
-  reader.onload = function(e){
+  reader.onload = async function(e){
     try{
       const data = new Uint8Array(e.target.result);
       const wb = XLSX.read(data, {type:"array"});
@@ -2368,9 +2392,11 @@ function importarMuestreoExcel(){
       const duplicados = filasMue.filter(f => idsExistentes.has(f.muestreo_id));
 
       if(duplicados.length && nuevos.length === 0){
-        if(!confirm(duplicados.length + " muestreo(s) ya existen en la app. ¿Reemplazarlos?")) return;
+        const ok = await pregunta("Duplicados en importación", duplicados.length + " muestreo(s) ya existen en la app. ¿Reemplazarlos?", {textoOK:"Reemplazar"});
+        if(!ok) return;
       } else if(duplicados.length){
-        if(!confirm(duplicados.length + " muestreo(s) duplicados serán omitidos. Se importarán " + nuevos.length + " nuevos. ¿Continuar?")) return;
+        const ok = await pregunta("Importación parcial", duplicados.length + " muestreo(s) duplicados serán omitidos. Se importarán " + nuevos.length + " nuevos.", {textoOK:"Continuar"});
+        if(!ok) return;
       }
 
       // Reconstruir muestreos
@@ -3511,7 +3537,7 @@ function checkPinTab(){
 
 function renderAdminContent(){
   const nPoli = Object.keys(POLIGONOS).length;
-  const nPoliActiva = nPoligonosFincaActiva();  // v25b: solo finca activa
+  const nPoliActiva = nPoligonosFincaActiva();  // v25c: solo finca activa
   const nSac = sacudidas().length;
   const nMues = muestreos().length;
   const plaguero = localStorage.getItem(K_PLAGUERO) || "";
@@ -3592,45 +3618,73 @@ function renderAdminContent(){
     // 2. Stats
     html += '<p style="color:#5b6467;font-size:13px;margin:0 0 12px">'+nPoli+' parcelas · '+nMues+' muestreos · '+nSac+' sacudidas</p>';
 
-    // 3. MAPAS OFFLINE (SECCIÓN DESTACADA)
-    // v25b: usa nPoliActiva (solo parcelas de finca activa) para saber si se puede
+    // ============================================================
+    // v25c: FLUJO REORGANIZADO
+    // Bloque A → Mapa de la finca activa (descarga del servidor)
+    // Bloque B → Mapas offline (imágenes satélite) — depende del A
+    // Bloque C → Opciones avanzadas (colapsable): KMZ manual + descargar TODAS
+    // ============================================================
+    const tsDescarga = localStorage.getItem("monitoreo.poligonos_ts");
+    const tsTxt = tsDescarga ? new Date(parseInt(tsDescarga)).toLocaleString("es-ES") : "nunca";
+    const fincasEnMeta = new Set();
+    Object.values(POLIGONOS_META || {}).forEach(m => { if(m && m.finca_id != null) fincasEnMeta.add(m.finca_id); });
     const fActiva0 = fincaActiva();
+
+    // --- BLOQUE A: Mapa de la finca activa ---
+    if(fActiva0){
+      const tieneMapa = nPoliActiva > 0;
+      html += '<div style="background:'+(tieneMapa?'#eaf5ea':'#fdecea')+';border:1px solid '+(tieneMapa?'#b5d9b5':'#e6b3b0')+';border-radius:8px;padding:12px;margin-bottom:14px">'+
+        '<div style="font-weight:700;font-size:14px;color:'+(tieneMapa?'#1c6b1c':'#c33')+';margin-bottom:6px">🗺️ Mapa de '+fActiva0.codigo+'</div>'+
+        '<div style="font-size:12px;color:'+(tieneMapa?'#1c6b1c':'#c33')+';margin-bottom:10px">'+
+          (tieneMapa
+            ? '<b>'+nPoliActiva+'</b> parcela'+(nPoliActiva===1?'':'s')+' descargada'+(nPoliActiva===1?'':'s')+' · última actualización: '+tsTxt
+            : 'Sin mapa descargado. Descárgalo del servidor para trabajar en el campo.')+
+        '</div>'+
+        '<div style="text-align:right"><button class="btn btn-guardar" style="flex:none;padding:10px 16px;font-size:13px;background:'+(tieneMapa?'#2e7d32':'#c33')+'" onclick="descargarPoligonosFincaActiva()">'+
+          (tieneMapa ? 'Actualizar mapa del servidor' : '↓ Descargar mapa del servidor') +
+        '</button></div>'+
+      '</div>';
+    } else {
+      html += '<div style="background:#fdecea;border:1px solid #e6b3b0;border-radius:8px;padding:12px;margin-bottom:14px;color:#c33;font-size:13px">'+
+        '⚠ Selecciona una finca activa arriba para poder gestionar su mapa.'+
+      '</div>';
+    }
+
+    // --- BLOQUE B: Mapas offline (imágenes satélite) ---
     html += '<div style="background:#e2f0ea;border:1px solid #a5d0bc;border-radius:8px;padding:12px;margin-bottom:14px">'+
-      '<div style="font-weight:700;font-size:14px;color:#0b6e4f;margin-bottom:4px">📶 Mapas para trabajar sin conexión</div>'+
+      '<div style="font-weight:700;font-size:14px;color:#0b6e4f;margin-bottom:4px">📶 Imágenes de satélite para trabajar sin conexión</div>'+
       '<div style="font-size:12px;color:#0b6e4f;margin-bottom:10px">'+
         (nTiles > 0
           ? '<b>' + nTiles.toLocaleString("es-ES") + '</b> imágenes cacheadas (~' + mbAprox + ' MB) · Listo para offline'
-          : 'Sin cachear todavía. Descarga los mapas antes de ir al campo.')+
+          : 'Sin cachear todavía. Descarga las imágenes antes de ir al campo.')+
       '</div>'+
       (fActiva0
-        ? '<div style="font-size:11px;color:#5b6467;margin-bottom:6px">Se descargarán solo los tiles de la finca activa: <b>'+fActiva0.codigo+'</b> ('+nPoliActiva+' parcela'+(nPoliActiva===1?'':'s')+')</div>'
+        ? '<div style="font-size:11px;color:#5b6467;margin-bottom:6px">Se descargarán solo las imágenes de <b>'+fActiva0.codigo+'</b> ('+nPoliActiva+' parcela'+(nPoliActiva===1?'':'s')+')</div>'
         : '')+
       '<button class="btn btn-guardar" style="flex:none;padding:10px 14px;font-size:13px;width:100%" onclick="abrirPrecarga()" ' + (nPoliActiva === 0 ? 'disabled' : '') + '>'+
-        (nTiles > 0 ? 'Actualizar mapas offline' : 'Descargar mapas offline') +
+        (nTiles > 0 ? 'Actualizar imágenes offline' : 'Descargar imágenes offline') +
       '</button>'+
-      (nPoliActiva === 0 ? '<div style="font-size:11px;color:#5b6467;margin-top:6px">'+(fActiva0 ? 'La finca activa no tiene polígonos. Descarga primero ↓' : 'Elige una finca activa y descarga polígonos ↓')+'</div>' : '') +
+      (nPoliActiva === 0 ? '<div style="font-size:11px;color:#5b6467;margin-top:6px">'+(fActiva0 ? 'Primero descarga el mapa de esta finca ↑' : 'Elige una finca activa ↑')+'</div>' : '') +
     '</div>';
 
-    // 3b. DESCARGAR POLÍGONOS DEL SERVIDOR (v25b - nueva funcionalidad)
-    const tsDescarga = localStorage.getItem("monitoreo.poligonos_ts");
-    const tsTxt = tsDescarga ? new Date(parseInt(tsDescarga)).toLocaleString("es-ES") : "nunca";
-    // v25b: contar fincas distintas presentes en la metadata
-    const fincasEnMeta = new Set();
-    Object.values(POLIGONOS_META || {}).forEach(m => { if(m && m.finca_id != null) fincasEnMeta.add(m.finca_id); });
-    html += '<div style="background:#eaf5ea;border:1px solid #b5d9b5;border-radius:8px;padding:12px;margin-top:14px">'+
-      '<div style="font-weight:700;font-size:14px;color:#1c6b1c;margin-bottom:4px">🌐 Descargar polígonos del servidor</div>'+
-      '<div style="font-size:12px;color:#1c6b1c;margin-bottom:10px">Descarga las parcelas georreferenciadas de la base de datos. Se guardan localmente para trabajar offline.</div>'+
-      '<div style="font-size:11px;color:#5b6467;margin-bottom:4px">Última descarga: '+tsTxt+'</div>'+
-      '<div style="font-size:11px;color:#5b6467;margin-bottom:8px">Local: <b>'+nPoli+'</b> parcela(s) de <b>'+fincasEnMeta.size+'</b> finca(s) · Finca activa: <b>'+nPoliActiva+'</b></div>'+
-      '<div style="text-align:right"><button class="btn btn-guardar" style="flex:none;padding:10px 16px;font-size:13px;background:#2e7d32" onclick="descargarPoligonosServidor()">Descargar del servidor</button></div>'+
+    // --- BLOQUE C: Opciones avanzadas (colapsable) ---
+    html += '<details style="margin-bottom:14px">'+
+      '<summary style="cursor:pointer;padding:8px 12px;background:#f0f2f0;border:1px solid #d5dad8;border-radius:6px;font-size:12px;color:#5b6467;font-weight:600">⚙ Opciones avanzadas de mapas</summary>'+
+      '<div style="padding:10px 4px 0">';
+    // C1: Descargar todas las fincas
+    html += '<div style="background:#f8f9f8;border:1px solid #d5dad8;border-radius:6px;padding:10px;margin-bottom:10px">'+
+      '<div style="font-weight:600;font-size:12px;color:#5b6467;margin-bottom:4px">Descargar TODAS las fincas de golpe</div>'+
+      '<div style="font-size:11px;color:#8a9299;margin-bottom:8px">Local: '+nPoli+' parcela(s) de '+fincasEnMeta.size+' finca(s)</div>'+
+      '<div style="text-align:right"><button class="btn btn-guardar" style="flex:none;padding:8px 14px;font-size:12px;background:#8a9299" onclick="descargarPoligonosServidor()">Descargar todas</button></div>'+
     '</div>';
-
-    // 4. Cargar KMZ (fallback manual)
-    html += '<div style="margin-top:14px;padding-top:14px;border-top:1px dashed #d5dad8">';
-    html += '<div style="font-size:11px;color:#8a9299;margin-bottom:6px">Alternativa manual (fallback):</div>';
-    html += '<label style="font-size:13px;color:#5b6467">Cargar KMZ / KML / GeoJSON<input type="file" id="fkmz" style="width:100%;padding:10px;border:1px solid #d5dad8;border-radius:6px;margin-top:6px;font-size:14px"></label>';
-    html += '<div style="text-align:right;margin-top:8px"><button class="btn btn-guardar" style="flex:none;padding:10px 16px;font-size:13px" onclick="cargarArchivo()">Cargar mapa</button></div>';
-    html += '</div>';
+    // C2: KMZ manual
+    html += '<div style="background:#f8f9f8;border:1px solid #d5dad8;border-radius:6px;padding:10px">'+
+      '<div style="font-weight:600;font-size:12px;color:#5b6467;margin-bottom:4px">Cargar KMZ manual (fallback)</div>'+
+      '<div style="font-size:11px;color:#8a9299;margin-bottom:8px">Alternativa cuando el servidor no responde.</div>'+
+      '<label style="font-size:12px;color:#5b6467">Archivo KMZ / KML / GeoJSON<input type="file" id="fkmz" style="width:100%;padding:8px;border:1px solid #d5dad8;border-radius:6px;margin-top:4px;font-size:13px"></label>'+
+      '<div style="text-align:right;margin-top:6px"><button class="btn btn-guardar" style="flex:none;padding:8px 14px;font-size:12px;background:#8a9299" onclick="cargarArchivo()">Cargar KMZ</button></div>'+
+    '</div>';
+    html += '</div></details>';
 
     // 4b. IMPORTAR MUESTREO desde Excel
     html += '<div style="background:#eef4fc;border:1px solid #b8d3ee;border-radius:8px;padding:12px;margin-top:14px">'+
@@ -3778,12 +3832,13 @@ function abrirAdmin(){ ir('admin'); }
 function mostrarAdmin(){ ir('admin'); }
 function checkPin(){ checkPinTab(); }
 
-function guardarPlaguero(){
+async function guardarPlaguero(){
   const el = document.getElementById("f-plaguero");
   if(!el){ aviso("Campo no encontrado"); return; }
   const v = el.value.trim();
   if(!v){
-    if(!confirm("¿Dejar el nombre de plaguero vacío?")) return;
+    const ok = await pregunta("Sin nombre de plaguero", "¿Dejar el nombre de plaguero vacío?");
+    if(!ok) return;
   }
   localStorage.setItem(K_PLAGUERO, v);
   aviso(v ? "✓ Nombre guardado: " + v : "Nombre borrado");
@@ -3805,12 +3860,13 @@ async function descargarFincas(){
   }
 }
 
-function guardarFincaActiva(){
+async function guardarFincaActiva(){
   const sel = document.getElementById("f-finca-activa");
   if(!sel){ aviso("Selector no encontrado"); return; }
   const id = sel.value;
   if(!id){
-    if(!confirm("¿Quieres dejar la app SIN finca activa? Los muestreos no se sincronizarán.")) return;
+    const ok = await pregunta("Sin finca activa", "¿Quieres dejar la app SIN finca activa? Los muestreos no se sincronizarán.", {tipo:"peligro", textoOK:"Sí, dejar sin finca"});
+    if(!ok) return;
     localStorage.removeItem(K_FINCA_ACTIVA);
     actualizarCabeceraFinca();
     aviso("✗ Sin finca activa");
@@ -3822,6 +3878,29 @@ function guardarFincaActiva(){
   const f = fincaActiva();
   aviso("✓ Finca activa guardada: " + f.nombre_completo);
   renderAdminContent(); // refresca para mostrar la nueva finca activa
+
+  // v25c: forzar reencuadre del mapa la próxima vez que se abra
+  // (aunque el usuario no cambie de vista, el mapa se ajustará a la nueva finca)
+  MAPA.ultimaFincaId = null;
+  // Si el mapa está actualmente visible, redibujarlo YA
+  const vMapa = document.getElementById("v-mapa");
+  if(vMapa && vMapa.style.display === "block"){
+    setTimeout(() => pintarMapaGrande(), 100);
+  }
+
+  // v25c: comprobar si esta finca tiene polígonos descargados
+  // Si no, ofrecer descargarlos automáticamente (flujo lógico de configuración)
+  setTimeout(async () => {
+    const nPoliActiva = nPoligonosFincaActiva();
+    if(nPoliActiva === 0){
+      const descargar = await pregunta(
+        "Esta finca no tiene mapa",
+        f.nombre_completo + " no tiene polígonos descargados en la app.\n\n¿Descargar el mapa del servidor ahora? (Necesitas conexión)",
+        {textoOK:"Descargar mapa", textoCancel:"Después"}
+      );
+      if(descargar) descargarPoligonosFincaActiva();
+    }
+  }, 400);
 }
 
 // Compatibilidad con versiones anteriores (por si hay onchange antiguo)
@@ -3890,43 +3969,45 @@ function procesarGeoJSON(txt){
 }
 
 // ============================================================
-// DESCARGA DE POLÍGONOS DESDE SERVIDOR (v25b)
+// DESCARGA DE POLÍGONOS DESDE SERVIDOR (v25c)
 // ============================================================
 // Descarga las parcelas con geometría desde Supabase y las convierte
 // al formato interno que usa la app (mismo que produce el KMZ).
 // Formato interno: { "ALIA1": [[lon,lat],[lon,lat],...], "ALIA30": [...] }
-async function descargarPoligonosServidor(){
-  const btn = event.target;
-  const textoOriginal = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = "Descargando...";
+//
+// v25c: refactorizado en 3 funciones:
+//   - _descargarPoligonosCore(filtroSupabase, btn)  → función interna
+//   - descargarPoligonosFincaActiva()               → solo finca activa (flujo lógico)
+//   - descargarPoligonosServidor()                  → todas las fincas (opción avanzada)
+
+async function _descargarPoligonosCore(filtroSupabase, btn, mensajeExito){
+  const textoOriginal = btn ? btn.textContent : "";
+  if(btn){ btn.disabled = true; btn.textContent = "Descargando..."; }
   try{
-    // 1. Descargar todas las parcelas con geometría (todas las fincas)
-    // Supabase con PostGIS devuelve geometría como GeoJSON string
+    // 1. Descargar parcelas con geometría según filtro
     const parcelas = await supabaseGet(
       "parcelas",
-      "select=codigo,finca_id,geometria&geometria=not.is.null"
+      "select=codigo,finca_id,geometria&geometria=not.is.null" + (filtroSupabase ? "&" + filtroSupabase : "")
     );
     if(!parcelas || parcelas.length === 0){
-      aviso("El servidor no tiene polígonos disponibles todavía");
-      return;
+      await alerta("Sin polígonos", "El servidor no tiene polígonos para esta búsqueda.");
+      return { ok: false, n: 0 };
     }
-    // 2. Convertir formato Supabase (GeoJSON) al formato interno de la app
-    //    y capturar metadata (finca_id) por parcela para filtrado por finca activa.
-    const nuevos = {};
-    const nuevosMeta = {};  // v25b: metadata para poder filtrar por finca_id
+    // 2. Convertir formato Supabase (GeoJSON) al formato interno + capturar meta
+    //    IMPORTANTE: preservar polígonos existentes de OTRAS fincas (merge, no replace)
+    const nuevos = Object.assign({}, POLIGONOS || {});
+    const nuevosMeta = Object.assign({}, POLIGONOS_META || {});
     let saltadas = 0;
-    // Conteo por finca para el mensaje final
-    const porFinca = {};
+    let añadidos = 0;
+    const fincasAfectadas = new Set();
     parcelas.forEach(p => {
       try{
-        // geometria puede venir como objeto GeoJSON o como string
         const geo = (typeof p.geometria === "string") ? JSON.parse(p.geometria) : p.geometria;
         if(geo && geo.type === "Polygon" && Array.isArray(geo.coordinates) && geo.coordinates.length > 0){
-          // GeoJSON Polygon: coordinates[0] es el anillo exterior [[lon,lat],...]
           nuevos[p.codigo] = geo.coordinates[0];
           nuevosMeta[p.codigo] = { finca_id: p.finca_id };
-          porFinca[p.finca_id] = (porFinca[p.finca_id] || 0) + 1;
+          fincasAfectadas.add(p.finca_id);
+          añadidos++;
         } else {
           saltadas++;
         }
@@ -3934,74 +4015,116 @@ async function descargarPoligonosServidor(){
         saltadas++;
       }
     });
-    if(Object.keys(nuevos).length === 0){
-      aviso("Los polígonos del servidor no tienen formato válido");
-      return;
+    if(añadidos === 0){
+      await alerta("Formato inválido", "Los polígonos del servidor no tienen formato válido.");
+      return { ok: false, n: 0 };
     }
-    // 3. Guardar en localStorage: polígonos + metadata + timestamp
+    // 3. Guardar: polígonos + metadata + timestamp
     POLIGONOS = nuevos;
     POLIGONOS_META = nuevosMeta;
     localStorage.setItem(K_POLIGONOS, JSON.stringify(POLIGONOS));
     localStorage.setItem(K_POLIGONOS_META, JSON.stringify(POLIGONOS_META));
     localStorage.setItem("monitoreo.poligonos_ts", Date.now().toString());
-    const n = Object.keys(nuevos).length;
-    const nFincas = Object.keys(porFinca).length;
-    const msg = n + " parcelas descargadas de " + nFincas + " finca(s)" +
-      (saltadas > 0 ? " (" + saltadas + " saltadas por formato)" : "");
-    aviso(msg);
+    const msg = mensajeExito || (añadidos + " parcelas descargadas");
+    aviso(msg + (saltadas > 0 ? " (" + saltadas + " con formato inválido)" : ""));
     render();
     if(S.admin) renderAdminContent();
-    // Ofrecer preparar mapas offline como en la carga KMZ
-    // v25b: la precarga usa poligonosDeFincaActiva() → solo tiles de la finca activa
-    setTimeout(() => {
-      const fA = fincaActiva();
-      if(!fA){
-        aviso("Elige una finca activa antes de descargar mapas offline");
-        return;
-      }
-      const nActiva = nPoligonosFincaActiva();
-      if(nActiva === 0){
-        aviso("La finca activa (" + fA.codigo + ") no tiene polígonos");
-        return;
-      }
-      if(confirm("¿Preparar los mapas offline de la finca activa (" + fA.codigo + ", " + nActiva + " parcelas)?\n\nEs recomendable si vas a salir al campo con la tablet.")){
-        abrirPrecarga();
-      }
-    }, 400);
+    return { ok: true, n: añadidos, fincas: fincasAfectadas.size };
   } catch(e){
     console.error("Error descargando polígonos:", e);
-    aviso("Error al descargar: " + (e.message || e));
+    await alerta("Error de descarga", "No se han podido descargar los polígonos:\n\n" + (e.message || e));
+    return { ok: false, n: 0 };
   } finally {
-    btn.disabled = false;
-    btn.textContent = textoOriginal;
+    if(btn){ btn.disabled = false; btn.textContent = textoOriginal; }
   }
 }
 
-function guardarPoligonos(nuevos){
+// v25c: descarga los polígonos SOLO de la finca activa (flujo lógico normal).
+async function descargarPoligonosFincaActiva(){
+  const fA = fincaActiva();
+  if(!fA){
+    await alerta("Sin finca activa", "Elige una finca en Admin antes de descargar su mapa.");
+    return;
+  }
+  const btn = event && event.target && event.target.tagName === "BUTTON" ? event.target : null;
+  const r = await _descargarPoligonosCore(
+    "finca_id=eq." + fA.id,
+    btn,
+    "✓ Mapa de " + fA.codigo + " descargado"
+  );
+  if(!r.ok) return;
+  // Ofrecer preparar mapas offline
+  setTimeout(async () => {
+    const nActiva = nPoligonosFincaActiva();
+    if(nActiva === 0) return;
+    const ok = await pregunta(
+      "Preparar mapas offline",
+      "¿Descargar las imágenes de satélite de " + fA.codigo + " (" + nActiva + " parcela" + (nActiva===1?"":"s") + ") para trabajar sin conexión?\n\nRecomendado antes de ir al campo.",
+      {textoOK:"Descargar imágenes"}
+    );
+    if(ok) abrirPrecarga();
+  }, 400);
+}
+
+// v25c: descarga TODOS los polígonos de todas las fincas (opción avanzada).
+async function descargarPoligonosServidor(){
+  const btn = event && event.target && event.target.tagName === "BUTTON" ? event.target : null;
+  const r = await _descargarPoligonosCore(null, btn, null);
+  if(!r.ok) return;
+  aviso("✓ " + r.n + " parcelas de " + r.fincas + " finca(s) descargadas");
+  // Ofrecer preparar mapas offline (solo finca activa por el fix del bug 2)
+  setTimeout(async () => {
+    const fA = fincaActiva();
+    if(!fA){
+      await alerta("Sin finca activa", "Elige una finca activa para descargar mapas offline.");
+      return;
+    }
+    const nActiva = nPoligonosFincaActiva();
+    if(nActiva === 0){
+      await alerta("Sin polígonos", "La finca activa (" + fA.codigo + ") no tiene polígonos.");
+      return;
+    }
+    const ok = await pregunta(
+      "Preparar mapas offline",
+      "¿Descargar las imágenes de satélite de " + fA.codigo + " (" + nActiva + " parcelas) para trabajar sin conexión?",
+      {textoOK:"Descargar imágenes"}
+    );
+    if(ok) abrirPrecarga();
+  }, 400);
+}
+
+async function guardarPoligonos(nuevos){
   const n = Object.keys(nuevos).length;
   if(n === 0){ aviso("No se han encontrado polígonos"); return; }
   const yaHay = Object.keys(POLIGONOS).length > 0;
-  if(yaHay && !confirm("Ya hay "+Object.keys(POLIGONOS).length+" parcelas cargadas. ¿Reemplazar por las "+n+" nuevas?")) return;
+  if(yaHay){
+    const ok = await pregunta("Reemplazar mapa", "Ya hay "+Object.keys(POLIGONOS).length+" parcelas cargadas. ¿Reemplazar por las "+n+" nuevas del KMZ?", {textoOK:"Reemplazar"});
+    if(!ok) return;
+  }
   POLIGONOS = nuevos;
-  // v25b: KMZ manual no trae finca_id, así que borramos la meta.
+  // v25c: KMZ manual no trae finca_id, así que borramos la meta.
   // La retrocompatibilidad hace que poligonosDeFincaActiva() devuelva TODO
   // cuando no hay meta, preservando el flujo antiguo.
   POLIGONOS_META = {};
   localStorage.setItem(K_POLIGONOS, JSON.stringify(POLIGONOS));
   localStorage.removeItem(K_POLIGONOS_META);
-  aviso(n+" parcelas cargadas");
+  aviso(n+" parcelas cargadas del KMZ");
   render();
   if(S.admin) renderAdminContent();
   // Preguntar si quiere preparar mapas offline ahora mismo
-  setTimeout(() => {
-    if(confirm("¿Preparar los mapas para trabajar sin conexión ahora?\n\nEs recomendable si vas a salir al campo con la tablet.")){
-      abrirPrecarga();
-    }
+  setTimeout(async () => {
+    const ok = await pregunta(
+      "Preparar mapas offline",
+      "¿Descargar ahora las imágenes de satélite para trabajar sin conexión?\n\nRecomendado antes de ir al campo.",
+      {textoOK:"Descargar imágenes"}
+    );
+    if(ok) abrirPrecarga();
   }, 300);
 }
 
-function borrarPoli(){
-  if(!confirm("¿Borrar todos los mapas cargados? Las sacudidas guardadas se mantienen.")) return;
+async function borrarPoli(){
+  const ok = await pregunta("Borrar mapas cargados", "¿Borrar todos los mapas cargados? Las sacudidas guardadas se mantienen.", {tipo:"peligro", textoOK:"Borrar"});
+  if(!ok) return;
   POLIGONOS = {};
   POLIGONOS_META = {};
   localStorage.removeItem(K_POLIGONOS);
@@ -4011,10 +4134,11 @@ function borrarPoli(){
   if(S.admin) renderAdminContent();
 }
 
-function borrarSacHoy(){
+async function borrarSacHoy(){
   const nHoy = sacudidasHoy().length;
   if(!nHoy){ aviso("No hay sacudidas de hoy"); return; }
-  if(!confirm("¿Borrar TODAS las sacudidas de hoy y sus muestreos? No se pueden recuperar.")) return;
+  const ok = await pregunta("Borrar sacudidas de hoy", "¿Borrar TODAS las sacudidas de hoy y sus muestreos?\n\nEsta acción NO se puede deshacer.", {tipo:"peligro", textoOK:"Borrar todas"});
+  if(!ok) return;
   const hoy = new Date().toISOString().slice(0,10);
   const restantes = sacudidas().filter(s => s.fecha.slice(0,10) !== hoy);
   const idsHoy = new Set(sacudidasHoy().map(s => s.muestreo_id));
@@ -4027,10 +4151,20 @@ function borrarSacHoy(){
   if(S.admin) renderAdminContent();
 }
 
-function resetTotal(){
-  if(!confirm("RESET TOTAL. Se borra TODO: sacudidas, muestreos, mapas, configuración. ¿Seguir?")) return;
-  if(!confirm("Segunda confirmación. Esto es irreversible. ¿Confirmar?")) return;
-  Object.keys(localStorage).filter(k => k.startsWith("sac_")).forEach(k => localStorage.removeItem(k));
+async function resetTotal(){
+  const ok1 = await pregunta(
+    "⚠ Reset TOTAL",
+    "Se borrará TODO: sacudidas, muestreos, mapas, configuración.\n\nEsta acción es irreversible.",
+    {tipo:"peligro", textoOK:"Continuar"}
+  );
+  if(!ok1) return;
+  const ok2 = await pregunta(
+    "⚠ Segunda confirmación",
+    "Última oportunidad. ¿Realmente quieres borrarlo TODO?",
+    {tipo:"peligro", textoOK:"Sí, borrar todo"}
+  );
+  if(!ok2) return;
+  Object.keys(localStorage).filter(k => k.startsWith("sac_") || k.startsWith("monitoreo.")).forEach(k => localStorage.removeItem(k));
   aviso("Todo borrado. Recargando…");
   setTimeout(() => location.reload(), 800);
 }
@@ -4078,6 +4212,66 @@ function modalConfirmar(opts){
   velo.onclick = (e) => {
     if(e.target === velo) velo.remove();
   };
+}
+
+// v25c: wrapper con Promise para reemplazar confirm() nativo del navegador.
+// Uso: const ok = await pregunta("¿Borrar?", "Esta acción no se puede deshacer.");
+// Devuelve true si acepta, false si cancela o cierra.
+// Parámetros opcionales:
+//   textoOK (default "Aceptar"), textoCancel (default "Cancelar")
+//   colorOK (default verde), tipo ("normal" | "peligro" para pintar rojo)
+function pregunta(titulo, mensaje, opts){
+  opts = opts || {};
+  const textoOK = opts.textoOK || "Aceptar";
+  const textoCancel = opts.textoCancel || "Cancelar";
+  const esPeligro = opts.tipo === "peligro";
+  const colorOK = opts.colorOK || (esPeligro ? "#c33" : "#0b6e4f");
+  // Reemplazar salto de línea "\n" por <br> para preservar formato de mensajes largos
+  const mensajeHTML = String(mensaje || "").replace(/\n/g, "<br>");
+  return new Promise((resolve) => {
+    // Reutilizamos el modalConfirmar existente
+    modalConfirmar({
+      titulo: titulo,
+      mensaje: mensajeHTML,
+      opciones: [
+        { texto: textoOK, color: colorOK, accion: () => resolve(true) },
+        { texto: textoCancel, color: "#8a9299", accion: () => resolve(false) }
+      ]
+    });
+    // Si el usuario cierra clicando fuera, el resolve queda pendiente.
+    // Detectamos remove del nodo:
+    const observador = new MutationObserver(() => {
+      if(!document.getElementById("modal-confirmar")){
+        observador.disconnect();
+        resolve(false);  // considerar cerrar-fuera como Cancelar
+      }
+    });
+    observador.observe(document.body, {childList:true});
+  });
+}
+
+// v25c: helper alerta() con Promise - simple aviso con un solo botón.
+// Uso: await alerta("Aviso", "El servidor no responde");
+function alerta(titulo, mensaje, opts){
+  opts = opts || {};
+  const textoOK = opts.textoOK || "Entendido";
+  const mensajeHTML = String(mensaje || "").replace(/\n/g, "<br>");
+  return new Promise((resolve) => {
+    modalConfirmar({
+      titulo: titulo,
+      mensaje: mensajeHTML,
+      opciones: [
+        { texto: textoOK, color: "#0b6e4f", accion: () => resolve(true) }
+      ]
+    });
+    const observador = new MutationObserver(() => {
+      if(!document.getElementById("modal-confirmar")){
+        observador.disconnect();
+        resolve(true);
+      }
+    });
+    observador.observe(document.body, {childList:true});
+  });
 }
 
 // ============ ARRANQUE ============
