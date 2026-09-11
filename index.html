@@ -3716,13 +3716,23 @@ function renderAdminContent(){
       '</div>';
     }
 
-    // 5. Acciones destructivas
-    html += '<div style="margin-top:20px;padding-top:14px;border-top:1px solid #eee;display:flex;flex-direction:column;gap:8px">';
-    if(nPoli > 0) html += '<button class="btn btn-s" onclick="borrarPoli()">Borrar mapas cargados</button>';
-    if(nTiles > 0) html += '<button class="btn btn-s" onclick="vaciarCachePrecarga()">Borrar mapas offline</button>';
-    if(nSac > 0) html += '<button class="btn btn-s" onclick="borrarSacHoy()">Borrar datos de hoy</button>';
-    if(nSac > 0) html += '<button class="btn btn-s" style="color:#b3261e" onclick="resetTotal()">RESET TOTAL</button>';
-    html += '</div>';
+    // 5. Datos y almacenamiento (colapsable)
+    html += '<details style="margin-top:20px;padding-top:14px;border-top:1px solid #eee">'+
+      '<summary style="cursor:pointer;padding:8px 12px;background:#f0f2f0;border:1px solid #d5dad8;border-radius:6px;font-size:12px;color:#5b6467;font-weight:600">🛠 Datos y almacenamiento</summary>'+
+      '<div style="padding:10px 4px 0;display:flex;flex-direction:column;gap:8px">';
+    // v25c: Botón actualizar app (útil cuando la app está instalada como PWA
+    // y no hay navegador visible para forzar reload)
+    html += '<div style="background:#eef4fc;border:1px solid #b8d3ee;border-radius:6px;padding:10px">'+
+      '<div style="font-weight:600;font-size:12px;color:#1b5e9e;margin-bottom:4px">🔄 Actualizar app a la última versión</div>'+
+      '<div style="font-size:11px;color:#5b6467;margin-bottom:8px">Limpia la caché del navegador y recarga la app. Útil cuando la app está instalada y no ves la barra del navegador. NO borra tus datos.</div>'+
+      '<div style="text-align:right"><button class="btn btn-guardar" style="flex:none;padding:8px 14px;font-size:12px;background:#1b5e9e" onclick="actualizarApp()">Actualizar app</button></div>'+
+    '</div>';
+    // Botones destructivos (solo si hay datos)
+    if(nPoli > 0) html += '<button class="btn btn-s" onclick="borrarPoli()">🗑 Borrar polígonos cargados ('+nPoli+')</button>';
+    if(nTiles > 0) html += '<button class="btn btn-s" onclick="vaciarCachePrecarga()">🗑 Borrar imágenes offline ('+nTiles.toLocaleString("es-ES")+', ~'+mbAprox+' MB)</button>';
+    if(nSac > 0) html += '<button class="btn btn-s" onclick="borrarSacHoy()">🗑 Borrar sacudidas de hoy</button>';
+    if(nSac > 0) html += '<button class="btn btn-s" style="color:#b3261e;border-color:#e6b3b0" onclick="resetTotal()">⚠ RESET TOTAL (todo borrado)</button>';
+    html += '</div></details>';
 
     html += '</div>';
 
@@ -4149,6 +4159,45 @@ async function borrarSacHoy(){
   S.muestreoActivo = null;
   render();
   if(S.admin) renderAdminContent();
+}
+
+// v25c: Actualizar app forzando descarga de nueva versión.
+// Útil especialmente cuando la app está instalada como PWA y no hay
+// barra de navegador visible para hacer "refrescar duro".
+// NO borra localStorage — solo cachés HTTP y service worker.
+async function actualizarApp(){
+  const ok = await pregunta(
+    "Actualizar app",
+    "Se limpiará la caché del navegador y se recargará la app para descargar la última versión.\n\nTus datos (mapas descargados, muestreos, configuración) NO se borran.",
+    {textoOK:"Actualizar ahora"}
+  );
+  if(!ok) return;
+  aviso("Actualizando…");
+  try{
+    // 1. Desregistrar todos los service workers de este scope
+    if("serviceWorker" in navigator){
+      const regs = await navigator.serviceWorker.getRegistrations();
+      for(const reg of regs){
+        try{ await reg.unregister(); }catch(e){ console.warn("SW unregister:", e); }
+      }
+    }
+    // 2. Borrar todas las cachés HTTP (no toca localStorage ni IndexedDB de tiles)
+    if("caches" in window){
+      const keys = await caches.keys();
+      for(const k of keys){
+        try{ await caches.delete(k); }catch(e){ console.warn("Cache delete:", e); }
+      }
+    }
+    // 3. Recargar la página desde red (bypass cache)
+    setTimeout(() => {
+      // location.reload(true) ya está deprecated pero funciona
+      // Alternativa: location.href = location.href + "?t=" + Date.now();
+      location.reload();
+    }, 400);
+  } catch(e){
+    console.error("Error al actualizar app:", e);
+    await alerta("Error", "No se pudo actualizar. Prueba a cerrar y reabrir la app.\n\nDetalle: " + (e.message || e));
+  }
 }
 
 async function resetTotal(){
