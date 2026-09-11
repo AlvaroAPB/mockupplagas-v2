@@ -9,7 +9,7 @@
  *   4. Elimina automáticamente cachés antiguas.
  */
 
-const CACHE_VERSION = "monitoreo-v25b-1";
+const CACHE_VERSION = "monitoreo-v25b-2";
 const APP_SHELL = [
   "./",
   "./index.html",

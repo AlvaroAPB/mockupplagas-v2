@@ -41,6 +41,10 @@
       calcula el bounding box SOLO de la finca activa, no de todos los polígonos
       cargados. Antes con fincas dispersas (Sevilla + Huelva) se descargaban
       cientos de miles de tiles de la zona intermedia. Ahora solo la finca.
+    - BUG 3 (mapa no se reencuadra al cambiar de finca): el mapa Leaflet
+      conserva su estado entre navegaciones. Al cambiar de finca activa y
+      volver al mapa, seguía centrado en la finca anterior. Ahora detecta
+      cambio de finca_id y fuerza fitBounds automáticamente.
 
   Retrocompatibilidad:
     - KMZ manual sigue funcionando (no trae finca_id, se muestra todo).
@@ -1960,6 +1964,11 @@ function pintarMapaGrande(){
     MAPA.gCapaTiles = crearCapaTiles();
     MAPA.gCapaTiles.addTo(MAPA.grande);
   }
+  // v25b: detectar cambio de finca activa → forzar reencuadre
+  const fA = fincaActiva();
+  const fincaActualId = fA ? fA.id : null;
+  const cambioFinca = MAPA.ultimaFincaId !== fincaActualId;
+  MAPA.ultimaFincaId = fincaActualId;
   const map = MAPA.grande;
   if(MAPA.gCapaParcelas){ try{ map.removeLayer(MAPA.gCapaParcelas); }catch(e){} }
   if(MAPA.gCapaPuntos){ try{ map.removeLayer(MAPA.gCapaPuntos); }catch(e){} }
@@ -2040,7 +2049,8 @@ function pintarMapaGrande(){
     MAPA.gCapaGPS = L.circleMarker([S.gps.lat, S.gps.lon], {radius:8, color:"#fff", weight:2.5, fillColor:"#1b5e9e", fillOpacity:1}).addTo(map);
   }
 
-  if(bounds.length && esPrimeraVez){
+  // v25b: reencuadrar cuando es primera vez O cuando cambia la finca activa
+  if(bounds.length && (esPrimeraVez || cambioFinca)){
     let all = bounds[0];
     for(let i=1; i<bounds.length; i++) all = all.extend(bounds[i]);
     map.fitBounds(all, {padding:[20,20]});
