@@ -1,5 +1,5 @@
 /**
- * Service Worker para Sacudidas v26c
+ * Service Worker para Sacudidas v26d
  * Estrategia: cache-first para app shell + librerías, network-first para Supabase
  *
  * Al desplegar nueva versión:
@@ -9,7 +9,7 @@
  *   4. Elimina automáticamente cachés antiguas.
  */
 
-const CACHE_VERSION = "monitoreo-v26c-1";
+const CACHE_VERSION = "monitoreo-v26d-1";
 const APP_SHELL = [
   "./",
   "./index.html",

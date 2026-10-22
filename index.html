@@ -23,6 +23,23 @@
   Autor: Álvaro Parra Bocccoli
 
   ----------------------------------------------------------------------------
+  VERSIÓN v26d
+  ----------------------------------------------------------------------------
+  Cambios respecto a v26c (segunda prueba en campo):
+
+  1) TRAMPAS · parcela: al abrir aparece vacía (como Sacudir). La sugerencia del
+     GPS es un aviso grande que se actualiza con cada lectura del GPS; nunca
+     cambia la parcela sola. Sin parcela, el mapa muestra toda la finca.
+  2) TECLADO NUMÉRICO PROPIO (sin el teclado del móvil) para capturas, fila y
+     árbol, con la tecla verde Siguiente / Guardar integrada.
+  3) ENVÍO con la lógica de Sacudir: desde Resumen, con el botón grande
+     "Enviar al servidor", que envía juntos muestreos y trampas. En Trampas
+     queda solo el indicador de pendientes.
+  4) TRAMPAS EN RESUMEN (revisadas hoy por parcela) y en RECIENTES (último
+     valor y tendencia), y PDF de trampas por parcela: mapa con su posición y
+     evolución de los últimos 14 días, con los datos del móvil.
+
+  ----------------------------------------------------------------------------
   VERSIÓN v26c
   ----------------------------------------------------------------------------
   Cambios respecto a v26b (tras la prueba en campo):
@@ -157,7 +174,7 @@
 <link rel="manifest" href="./manifest.json">
 <link rel="apple-touch-icon" href="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='24' fill='%230b6e4f'/%3E%3Ctext x='96' y='132' font-family='sans-serif' font-size='110' font-weight='700' text-anchor='middle' fill='%23fff'%3EM%3C/text%3E%3C/svg%3E">
 <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="10" fill="%230b6e4f"/><text x="32" y="45" font-family="sans-serif" font-size="38" font-weight="700" text-anchor="middle" fill="%23fff">S</text></svg>'>
-<title>Monitoreo de plagas · v26c</title>
+<title>Monitoreo de plagas · v26d</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -300,7 +317,7 @@ td b{color:#0b6e4f}
     <button class="chip" id="chip-gps" onclick="pedirGPS()">📍 Activar GPS</button>
 	<button class="chip" onclick="cerrarSesionApp()" style="background:rgba(179,38,30,0.4);color:#fff;" title="Cerrar sesión">🚪 Salir</button>
   </div>
-  <div style="position:absolute;bottom:2px;right:6px;font-size:8px;color:rgba(255,255,255,0.45);font-weight:500;letter-spacing:0.3px">v26c</div>
+  <div style="position:absolute;bottom:2px;right:6px;font-size:8px;color:rgba(255,255,255,0.45);font-weight:500;letter-spacing:0.3px">v26d</div>
 </header>
 
 <div class="tabs">
@@ -1399,8 +1416,9 @@ function muestreosPendientesEnvio(){
 
 async function enviarPendientes(){
   const pendientes = muestreosPendientesEnvio();
-  if(pendientes.length === 0){
-    aviso("No hay muestreos pendientes de enviar");
+  const nPendTrampas = nPendientesTrampas();   // v26d
+  if(pendientes.length === 0 && nPendTrampas === 0){
+    aviso("No hay nada pendiente de enviar");
     return;
   }
   if(!navigator.onLine){
@@ -1412,7 +1430,10 @@ async function enviarPendientes(){
     aviso("Configura una finca activa en Admin antes de enviar");
     return;
   }
-  mostrarSincronizacion(pendientes);
+  // v26d: primero las trampas (rápido), después los muestreos con su pantalla de progreso
+  if(nPendTrampas > 0) await sincronizarTrampas();
+  if(pendientes.length > 0) mostrarSincronizacion(pendientes);
+  else renderListaParcelas();
 }
 
 // ============ v24: SINCRONIZACIÓN CON SUPABASE ============
@@ -2701,7 +2722,7 @@ function reencuadrarMapa(){
 
 // ============ NAVEGACIÓN ============
 // ============================================================================
-// v26c: VALIDACIÓN DE POSICIÓN (sacudidas y trampas)
+// v26c/v26d: VALIDACIÓN DE POSICIÓN (sacudidas y trampas)
 // ----------------------------------------------------------------------------
 // Casos según dónde sitúa el GPS al plaguero respecto a la parcela elegida:
 //   dentro  -> sin aviso
@@ -2819,7 +2840,7 @@ async function cambiarParcelaConservando(cod){
 }
 
 // ============================================================================
-// v26c: MÓDULO DE TRAMPAS
+// v26d: MÓDULO DE TRAMPAS
 // ----------------------------------------------------------------------------
 // Principio: TODO se guarda en el móvil. Nada se conecta solo al guardar.
 //   - Seguimiento (rutina): mapa + lista de la parcela, ✓ al revisar, progreso.
@@ -2889,16 +2910,12 @@ function nPendientesTrampas(){
 }
 function parcelasFinca(){ return Object.keys(poligonosDeFincaActiva()).sort(); }
 
-// Parcela de trabajo de la pestaña: la elegida, o la del GPS, o la primera con trampas
+// Parcela de trabajo de la pestaña: solo la que elige el plaguero (el GPS sugiere, no impone)
 function parcelaTrampasActual(){
   const lista = parcelasFinca();
   if(S.traParcela && lista.includes(S.traParcela)) return S.traParcela;
-  if(S.parcelaDetectada && lista.includes(S.parcelaDetectada)) S.traParcela = S.parcelaDetectada;
-  else {
-    const conTrampas = lista.find(p => trampasActivasParcela(p).length > 0);
-    S.traParcela = conTrampas || lista[0] || null;
-  }
-  return S.traParcela;
+  S.traParcela = null;
+  return null;
 }
 function cambiarParcelaTrampas(cod){ guardarBorradorColocacion(); S.traParcela = cod; renderTrampas(); }
 function cambiarModoTrampas(modo){ guardarBorradorColocacion(); S.traModo = modo; renderTrampas(); }
@@ -2919,13 +2936,12 @@ function renderTrampas(){
     (modo === m ? 'background:#0b6e4f;color:#fff' : 'background:#eef0ef;color:#5b6467') + '">' + txt + '</button>';
 
   let html = '<div class="card">' +
-    '<div style="display:flex;gap:6px">' + tab("seg", "Seguimiento") + tab("col", "Colocación") + '</div>';
-
+    '<div style="display:flex;gap:6px">' + tab("seg", "Seguimiento") + tab("col", "Colocación") + '</div>' +
+    '<div id="tra-sugerencia"></div>';
   if(especies.length === 0){
     html += '<div style="margin-top:10px;background:#fdecea;border:1px solid #c33;border-radius:8px;padding:10px;font-size:12px;color:#c33">' +
       'El catálogo de este dispositivo no tiene especies de trampa. Ve a Admin y pulsa <b>Actualizar catálogos</b>.</div>';
   }
-  // Aviso de trampas en el servidor que este móvil no tiene (solo si la comprobación lo detectó)
   const sv = S.traServidor;
   if(sv && sv.fincaId === fA.id && (sv.nuevas + sv.retiradas) > 0){
     const partes = [];
@@ -2935,31 +2951,61 @@ function renderTrampas(){
       '<span>En el servidor hay ' + partes.join(" y ") + ' que este móvil no tiene.</span>' +
       '<button class="btn btn-guardar" style="flex:none;padding:8px 12px;font-size:13px" onclick="descargarTrampasServidor()">Cargar</button></div>';
   }
-  html += '<div style="margin-top:10px;display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;font-size:12px">' +
-    (pend > 0
-      ? '<span style="color:#b8771a;font-weight:700">' + pend + ' pendiente(s) de enviar</span>' +
-        '<button class="btn btn-s" style="flex:none;padding:6px 12px;font-size:12px" onclick="sincronizarTrampas()">Enviar al servidor</button>'
-      : '<span style="color:#0b6e4f">✓ Todo enviado</span>') +
-    '</div>';
-  // Parcela
-  html += '<div style="margin-top:10px;display:flex;gap:8px;align-items:center">' +
-    '<select class="parcela" style="flex:1" onchange="cambiarParcelaTrampas(this.value)">' +
+  // Parcela: desplegable (la sugerencia del GPS va encima, grande)
+  html += '<select class="parcela" style="margin-top:10px;width:100%" onchange="cambiarParcelaTrampas(this.value || null)">' +
+    '<option value="">- Elige parcela -</option>' +
     parcelas.map(p => {
       const act = trampasActivasParcela(p);
       const hechas = act.filter(revisadaHoy).length;
       const extra = act.length ? (modo === "seg" ? " · " + hechas + "/" + act.length + " hoy" : " · " + act.length + " trampas") : "";
       return '<option value="' + p + '"' + (p === parcela ? ' selected' : '') + '>' + p + extra + '</option>';
-    }).join('') + '</select></div>';
-  if(S.parcelaDetectada && S.parcelaDetectada !== parcela && parcelas.includes(S.parcelaDetectada)){
-    html += '<div style="margin-top:6px;font-size:12px;color:#1b5e9e">El GPS te sitúa en <b>' + S.parcelaDetectada + '</b> ' +
-      '<button style="margin-left:6px;padding:3px 10px;border:1px solid #1b5e9e;background:#fff;color:#1b5e9e;border-radius:6px;font-size:12px;cursor:pointer" onclick="cambiarParcelaTrampas(\'' + S.parcelaDetectada + '\')">Ir</button></div>';
+    }).join('') + '</select>';
+  // Pendientes: solo indicador; el envío se hace desde Resumen, como las sacudidas
+  if(pend > 0){
+    html += '<div style="margin-top:8px;font-size:12px;color:#b8771a;font-weight:600">' + pend + ' cambio(s) de trampas sin enviar · se envían desde ' +
+      '<a href="#" onclick="ir(\'res\');return false" style="color:#0b6e4f">Resumen</a></div>';
   }
   html += '</div>';
   html += '<div id="mapa-trampas" style="height:240px;border-radius:10px;overflow:hidden;margin-top:8px;border:1px solid #d5dad8"></div>';
-  html += modo === "col" ? htmlColocacion(parcela, especies) : htmlSeguimiento(parcela);
+  if(!parcela){
+    html += modo === "col"
+      ? '<div class="vacio">Elige la parcela donde vas a colocar las trampas.</div>'
+      : htmlResumenParcelasTrampas();
+  } else {
+    html += modo === "col" ? htmlColocacion(parcela, especies) : htmlSeguimiento(parcela);
+  }
   c.innerHTML = html;
-  restaurarBorradorColocacion();
+  conectarColocacion();
   pintarMapaTrampas();
+  actualizarSugerenciaTrampas();
+}
+
+// Sin parcela elegida: cómo va cada parcela de la finca
+function htmlResumenParcelasTrampas(){
+  const filas = parcelasFinca().map(p => ({p, act: trampasActivasParcela(p)})).filter(x => x.act.length);
+  if(!filas.length) return '<div class="vacio">No hay trampas en esta finca. Para colocarlas, usa la pestaña <b>Colocación</b>.</div>';
+  let html = '<div style="margin:12px 2px 4px;font-size:12px;font-weight:700;color:#5b6467;text-transform:uppercase;letter-spacing:0.4px">Elige parcela</div>';
+  filas.forEach(({p, act}) => {
+    const hechas = act.filter(revisadaHoy).length;
+    const ok = hechas === act.length;
+    html += '<div onclick="cambiarParcelaTrampas(\'' + p + '\')" style="background:' + (ok ? '#f3faf6' : '#fff') + ';border:1px solid #d5dad8;border-radius:8px;padding:12px;margin-top:6px;cursor:pointer;display:flex;justify-content:space-between;align-items:center">' +
+      '<b style="font-size:16px">' + p + '</b><span style="font-size:13px;font-weight:600;color:' + (ok ? '#0b6e4f' : '#b8771a') + '">' + (ok ? '✓ ' : '') + hechas + ' de ' + act.length + ' hoy</span></div>';
+  });
+  return html;
+}
+
+// Sugerencia de parcela por GPS: grande, y se actualiza con cada lectura del GPS
+function actualizarSugerenciaTrampas(){
+  const el = document.getElementById("tra-sugerencia");
+  if(!el) return;
+  const det = S.parcelaDetectada;
+  if(!det || det === S.traParcela || !parcelasFinca().includes(det)){ el.innerHTML = ""; return; }
+  const n = trampasActivasParcela(det).length;
+  el.innerHTML = '<div style="margin-top:10px;background:#1b5e9e;border-radius:10px;padding:12px;color:#fff;display:flex;justify-content:space-between;align-items:center;gap:10px">' +
+    '<div><div style="font-size:12px;opacity:0.9">📍 El GPS te sitúa en</div>' +
+    '<div style="font-size:22px;font-weight:800">' + det + '</div>' +
+    '<div style="font-size:11px;opacity:0.9">' + (n ? n + ' trampa(s)' : 'sin trampas') + '</div></div>' +
+    '<button onclick="cambiarParcelaTrampas(\'' + det + '\')" style="flex:none;padding:14px 18px;border:none;border-radius:10px;background:#fff;color:#1b5e9e;font-size:16px;font-weight:800;cursor:pointer">Ir</button></div>';
 }
 
 function htmlSeguimiento(parcela){
@@ -2981,6 +3027,7 @@ function htmlSeguimiento(parcela){
     html += '<div style="margin:10px 2px 0;font-size:14px;font-weight:700;color:#14181a">' + hechas + ' de ' + act.length + ' revisadas hoy</div>' +
       '<div style="height:6px;background:#eef0ef;border-radius:3px;margin:6px 2px 0;overflow:hidden"><i style="display:block;height:100%;width:' + Math.round(hechas / act.length * 100) + '%;background:#0b6e4f"></i></div>';
   }
+  html += '<div style="text-align:right;margin-top:8px"><button class="btn btn-s" style="flex:none;padding:6px 12px;font-size:12px" onclick="generarPDFTrampas(\'' + parcela + '\')">📄 PDF de ' + parcela + '</button></div>';
   const hayGPS = S.gps && S.gps.lat != null;
   const grupos = {};
   act.forEach(t => { (grupos[t.plaga_cod] = grupos[t.plaga_cod] || []).push(t); });
@@ -3011,6 +3058,54 @@ function htmlSeguimiento(parcela){
   return html;
 }
 
+// ---------- Teclado numérico propio (sin el teclado del móvil) ----------
+function tecladoHTML(prefijo, textoAccion){
+  const b = (k, txt, extra) => '<button type="button" data-tk="' + k + '"' + (k === "OK" ? ' id="' + prefijo + '-ok"' : '') +
+    ' style="height:56px;border:1px solid #d5dad8;border-radius:10px;background:#fff;font-size:26px;font-weight:700;color:#14181a;cursor:pointer;font-family:inherit;' + (extra || '') + '">' + txt + '</button>';
+  let h = '<div id="' + prefijo + '-teclado" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px">';
+  ["1","2","3","4","5","6","7","8","9"].forEach(k => { h += b(k, k); });
+  h += b("B", "⌫", "font-size:22px;background:#eef0ef");
+  h += b("0", "0");
+  h += b("OK", textoAccion, "font-size:17px;background:#0b6e4f;color:#fff;border-color:#0b6e4f");
+  return h + '</div>';
+}
+function campoNumeroHTML(id, etiqueta){
+  return '<div style="flex:1"><div style="font-size:12px;color:#5b6467;margin-bottom:4px">' + etiqueta + '</div>' +
+    '<div id="' + id + '" data-v="" style="padding:10px;border:2px solid #d5dad8;border-radius:10px;font-size:32px;font-weight:800;text-align:center;cursor:pointer;min-height:60px;box-sizing:border-box;color:#b0b6b4">—</div></div>';
+}
+// campos: ids de los campos; alAceptar(indiceActivo, api) se llama con la tecla verde
+function conectarTeclado(prefijo, campos, alAceptar, alCambiar){
+  const api = {activo: 0};
+  api.pintar = () => {
+    campos.forEach((id, i) => {
+      const el = document.getElementById(id);
+      if(!el) return;
+      const v = el.dataset.v || "";
+      el.textContent = v || "—";
+      el.style.color = v ? "#0b6e4f" : "#b0b6b4";
+      el.style.borderColor = i === api.activo ? "#0b6e4f" : "#d5dad8";
+      el.style.background = i === api.activo ? "#f3faf6" : "#fff";
+    });
+    if(alCambiar) alCambiar(api.activo);
+  };
+  api.activar = i => { api.activo = i; api.pintar(); };
+  campos.forEach((id, i) => { const el = document.getElementById(id); if(el) el.onclick = () => api.activar(i); });
+  document.querySelectorAll("#" + prefijo + "-teclado button[data-tk]").forEach(btn => {
+    btn.onclick = () => {
+      const k = btn.dataset.tk;
+      if(k === "OK"){ alAceptar(api.activo, api); return; }
+      const el = document.getElementById(campos[api.activo]);
+      let v = el.dataset.v || "";
+      if(k === "B") v = v.slice(0, -1);
+      else if(v.length < 5) v = (v === "0") ? k : v + k;
+      el.dataset.v = v;
+      api.pintar();
+    };
+  });
+  api.pintar();
+  return api;
+}
+
 function htmlColocacion(parcela, especies){
   const estiloCampo = 'width:100%;padding:12px;border:1px solid #d5dad8;border-radius:8px;margin-top:6px;font-size:16px;background:#fff;box-sizing:border-box';
   let html = '<div class="card">' +
@@ -3020,13 +3115,10 @@ function htmlColocacion(parcela, especies){
       '<option value="">- Elige especie -</option>' +
       especies.map(p => '<option value="' + p.cod + '">' + p.n + '</option>').join('') +
     '</select></label>' +
-    '<div style="display:flex;gap:10px">' +
-      '<label style="flex:1;font-size:12px;color:#5b6467">Fila<input id="nt-fila" type="number" inputmode="numeric" pattern="[0-9]*" min="1" step="1" style="' + estiloCampo + ';font-size:22px;font-weight:700;text-align:center"></label>' +
-      '<label style="flex:1;font-size:12px;color:#5b6467">Árbol<input id="nt-arbol" type="number" inputmode="numeric" pattern="[0-9]*" min="1" step="1" style="' + estiloCampo + ';font-size:22px;font-weight:700;text-align:center"></label>' +
-    '</div>' +
+    '<div style="display:flex;gap:10px">' + campoNumeroHTML("nt-fila", "Fila") + campoNumeroHTML("nt-arbol", "Árbol") + '</div>' +
+    tecladoHTML("nt", "Siguiente →") +
     '<label style="font-size:12px;color:#5b6467;display:block;margin-top:10px">Nota (opcional)<input id="nt-nota" type="text" style="' + estiloCampo + '"></label>' +
     '<div id="nt-gps" style="font-size:12px;border-radius:8px;padding:10px;margin-top:10px"></div>' +
-    '<button class="btn btn-guardar" style="width:100%;margin-top:12px;padding:14px" onclick="guardarNuevaTrampa()">Guardar trampa</button>' +
   '</div>';
   const act = trampasActivasParcela(parcela);
   if(act.length){
@@ -3039,14 +3131,24 @@ function htmlColocacion(parcela, especies){
   return html;
 }
 
+// Conecta el teclado de la colocación: Fila → Siguiente → Árbol → Guardar trampa
+function conectarColocacion(){
+  if(!document.getElementById("nt-teclado")) return;
+  restaurarBorradorColocacion();
+  S.traTeclado = conectarTeclado("nt", ["nt-fila", "nt-arbol"],
+    (activo, api) => { if(activo === 0) api.activar(1); else guardarNuevaTrampa(); },
+    activo => { const ok = document.getElementById("nt-ok"); if(ok) ok.textContent = activo === 0 ? "Siguiente →" : "Guardar"; });
+  pintarEstadoGPSColocacion();
+}
+
 // El borrador del formulario de colocación sobrevive a los repintados (cambio de parcela/modo)
 function guardarBorradorColocacion(){
   const e = document.getElementById("nt-especie");
   if(!e) return;
   S.traBorrador = {
     especie: e.value,
-    fila: document.getElementById("nt-fila").value,
-    arbol: document.getElementById("nt-arbol").value,
+    fila: document.getElementById("nt-fila").dataset.v || "",
+    arbol: document.getElementById("nt-arbol").dataset.v || "",
     nota: document.getElementById("nt-nota").value
   };
 }
@@ -3056,11 +3158,10 @@ function restaurarBorradorColocacion(){
   const b = S.traBorrador;
   if(b){
     e.value = b.especie || "";
-    document.getElementById("nt-fila").value = b.fila || "";
-    document.getElementById("nt-arbol").value = b.arbol || "";
+    document.getElementById("nt-fila").dataset.v = b.fila || "";
+    document.getElementById("nt-arbol").dataset.v = b.arbol || "";
     document.getElementById("nt-nota").value = b.nota || "";
   }
-  pintarEstadoGPSColocacion();
 }
 function pintarEstadoGPSColocacion(){
   const el = document.getElementById("nt-gps");
@@ -3098,7 +3199,13 @@ function pintarMapaTrampas(){
     if(sel) bounds = pl.getBounds();
   });
   const modo = S.traModo || "seg";
-  const act = trampasActivasParcela(parcela);
+  const act = parcela ? trampasActivasParcela(parcela) : trampasActivasFinca();
+  if(!parcela){
+    Object.values(polis).forEach(poly => {
+      const b = L.latLngBounds(poly.map(p => [p[1], p[0]]));
+      bounds = bounds ? bounds.extend(b) : b;
+    });
+  }
   let cercana = null;
   if(modo === "seg" && S.gps && S.gps.lat != null){
     let dmin = Infinity;
@@ -3136,6 +3243,7 @@ function actualizarGPSTrampas(){
     else MAPA.traGPS = L.circleMarker([S.gps.lat, S.gps.lon], {radius: 8, color: "#fff", weight: 3, fillColor: "#1b5e9e", fillOpacity: 1}).addTo(MAPA.tra);
   }
   pintarEstadoGPSColocacion();
+  actualizarSugerenciaTrampas();
 }
 
 // ---------- Colocación ----------
@@ -3143,13 +3251,13 @@ async function guardarNuevaTrampa(){
   const fA = fincaActiva();
   const parcela = S.traParcela;
   const plagaCod = document.getElementById("nt-especie").value;
-  const filaTxt = String(document.getElementById("nt-fila").value).trim();
-  const arbolTxt = String(document.getElementById("nt-arbol").value).trim();
+  const filaTxt = String(document.getElementById("nt-fila").dataset.v || "").trim();
+  const arbolTxt = String(document.getElementById("nt-arbol").dataset.v || "").trim();
   const nota = document.getElementById("nt-nota").value.trim();
   if(!fA || !parcela){ aviso("Elige la parcela"); return; }
   if(!plagaCod){ aviso("Elige la especie"); return; }
-  if(!/^\d+$/.test(filaTxt) || parseInt(filaTxt, 10) < 1){ aviso("Indica la fila (número entero)"); return; }
-  if(!/^\d+$/.test(arbolTxt) || parseInt(arbolTxt, 10) < 1){ aviso("Indica el árbol (número entero)"); return; }
+  if(!/^\d+$/.test(filaTxt) || parseInt(filaTxt, 10) < 1){ aviso("Indica la fila (número entero)"); if(S.traTeclado) S.traTeclado.activar(0); return; }
+  if(!/^\d+$/.test(arbolTxt) || parseInt(arbolTxt, 10) < 1){ aviso("Indica el árbol (número entero)"); if(S.traTeclado) S.traTeclado.activar(1); return; }
   const fila = parseInt(filaTxt, 10), arbol = parseInt(arbolTxt, 10);
   if(!S.gps || S.gps.lat == null){ aviso("Necesito tu posición GPS para guardar la trampa"); return; }
   if(S.gps.prec > PRECISION_MAX_M){ aviso("Precisión GPS insuficiente (±" + S.gps.prec + " m). Espera unos segundos."); return; }
@@ -3216,33 +3324,26 @@ function abrirRevisionTrampa(idLocal){
   const ultTxt = ult
     ? 'Última revisión: ' + new Date(ult.fecha).toLocaleDateString("es-ES", {day: "2-digit", month: "2-digit"}) + ' · <b>' + ult.capturas + '</b> capturas'
     : 'Primera revisión de esta trampa';
-  let html = '<div style="font-size:12px;font-weight:700;color:' + colorTrampa(t.plaga_cod) + ';text-transform:uppercase;letter-spacing:0.4px">' + nombrePlaga(t.plaga_cod) + ' · ' + t.parcela + '</div>' +
-    '<h3 style="margin:2px 0 2px;color:#14181a;font-size:22px">' + etiquetaTrampa(t) + '</h3>' +
-    '<div style="font-size:11px;color:#8b9295">' + t.codigo + '</div>' +
-    '<div style="font-size:12px;color:#5b6467;margin:6px 0 4px">' + ultTxt + '</div>' +
-    (yaHoy ? '<div style="font-size:12px;color:#b8771a;margin-bottom:6px">Ya se revisó hoy. Se guardará una revisión más.</div>' : '') +
-    '<div id="rt-dist" style="font-size:12px;margin-bottom:10px"></div>';
-  campos.forEach((cp, i) => {
-    html += '<label style="font-size:13px;color:#14181a;font-weight:600;display:block;margin-bottom:10px">' + cp.label +
-      '<input id="rt-n-' + i + '" type="number" inputmode="numeric" pattern="[0-9]*" min="0" step="1" placeholder="0" ' +
-      'style="width:100%;padding:14px;border:2px solid #0b6e4f;border-radius:10px;margin-top:6px;font-size:28px;font-weight:700;text-align:center;color:#0b6e4f;box-sizing:border-box">' +
-    '</label>';
-  });
-  html += '<label style="display:flex;align-items:center;gap:10px;font-size:14px;color:#14181a;padding:8px 2px">' +
-      '<input id="rt-placa" type="checkbox" style="width:22px;height:22px"> Cambio de placa / limpieza</label>' +
-    '<label style="display:flex;align-items:center;gap:10px;font-size:14px;color:#14181a;padding:8px 2px">' +
-      '<input id="rt-cebo" type="checkbox" style="width:22px;height:22px"> Cambio de cebo / feromona</label>' +
-    '<textarea id="rt-nota" placeholder="Nota (opcional)" style="width:100%;margin-top:6px;padding:10px;border:1px solid #d5dad8;border-radius:8px;font-size:14px;min-height:50px;box-sizing:border-box"></textarea>' +
-    '<div style="margin-top:14px;display:flex;gap:8px">' +
-      '<button class="btn btn-s" style="flex:1" onclick="cerrar()">Cancelar</button>' +
-      '<button class="btn btn-guardar" style="flex:1.4" id="rt-guardar">Guardar revisión</button>' +
+  let html = '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">' +
+      '<div><div style="font-size:12px;font-weight:700;color:' + colorTrampa(t.plaga_cod) + ';text-transform:uppercase;letter-spacing:0.4px">' + nombrePlaga(t.plaga_cod) + ' · ' + t.parcela + '</div>' +
+      '<h3 style="margin:2px 0 0;color:#14181a;font-size:22px">' + etiquetaTrampa(t) + '</h3></div>' +
+      '<button onclick="cerrar()" style="flex:none;padding:8px 12px;border:1px solid #d5dad8;background:#fff;border-radius:8px;font-size:13px;cursor:pointer">Cancelar</button>' +
     '</div>' +
-    '<div style="margin-top:18px;text-align:center">' +
+    '<div style="font-size:12px;color:#5b6467;margin:4px 0 2px">' + ultTxt + '</div>' +
+    (yaHoy ? '<div style="font-size:12px;color:#b8771a">Ya se revisó hoy. Se guardará una revisión más.</div>' : '') +
+    '<div id="rt-dist" style="font-size:12px;margin:2px 0 8px"></div>';
+  html += '<div style="display:flex;gap:10px">' + campos.map((cp, i) => campoNumeroHTML("rt-n-" + i, cp.label)).join('') + '</div>';
+  html += '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px">' +
+      '<label style="display:flex;align-items:center;gap:8px;font-size:14px;color:#14181a"><input id="rt-placa" type="checkbox" style="width:22px;height:22px"> Cambio de placa</label>' +
+      '<label style="display:flex;align-items:center;gap:8px;font-size:14px;color:#14181a"><input id="rt-cebo" type="checkbox" style="width:22px;height:22px"> Cambio de cebo</label>' +
+    '</div>' +
+    tecladoHTML("rt", campos.length > 1 ? "Siguiente →" : "Guardar") +
+    '<input id="rt-nota" type="text" placeholder="Nota (opcional)" style="width:100%;margin-top:10px;padding:10px;border:1px solid #d5dad8;border-radius:8px;font-size:14px;box-sizing:border-box">' +
+    '<div style="margin-top:14px;text-align:center">' +
       '<button style="background:none;border:none;color:#c33;font-size:12px;text-decoration:underline;cursor:pointer" id="rt-retirar">Retirar trampa (fin de temporada)</button>' +
     '</div>';
   document.getElementById("hoja").innerHTML = html;
   document.getElementById("velo").classList.add("on");
-  // Distancia a la trampa (informativa)
   const distEl = document.getElementById("rt-dist");
   const distTrampa = () => (S.gps && S.gps.lat != null && S.gps.prec <= PRECISION_MAX_M && t.lat != null)
     ? Math.round(distanciaM(S.gps.lat, S.gps.lon, t.lat, t.lon)) : null;
@@ -3251,17 +3352,14 @@ function abrirRevisionTrampa(idLocal){
     distEl.textContent = "Estás a " + d0 + " m de esta trampa";
     distEl.style.color = d0 > DIST_AVISO_TRAMPA_M ? "#c33" : "#0b6e4f";
   }
-  setTimeout(() => { const el = document.getElementById("rt-n-0"); if(el) el.focus(); }, 150);
 
-  document.getElementById("rt-guardar").onclick = async () => {
+  const guardar = async () => {
     const capturas = [];
     for(let i = 0; i < campos.length; i++){
-      const raw = String(document.getElementById("rt-n-" + i).value).trim();
-      if(raw === ""){ aviso("Introduce el número (0 si no hay capturas)"); return; }
-      if(!/^\d+$/.test(raw)){ aviso("Solo números enteros"); return; }
+      const raw = String(document.getElementById("rt-n-" + i).dataset.v || "").trim();
+      if(raw === ""){ aviso("Introduce el número (0 si no hay capturas)"); tecl.activar(i); return; }
       capturas.push({plaga_cod: t.plaga_cod, sub_cod: campos[i].sub, cantidad: parseInt(raw, 10)});
     }
-    // Validación: ¿estás en ESTA trampa? (solo en trampas)
     const d = distTrampa();
     if(d != null && d > DIST_AVISO_TRAMPA_M){
       const ok = await pregunta("¿Es esta la trampa?",
@@ -3269,7 +3367,6 @@ function abrirRevisionTrampa(idLocal){
         {textoOK: "Sí, es esta", textoCancel: "Revisar"});
       if(!ok) return;
     }
-    // Posible error de tecleo
     const total = capturas.reduce((a, c) => a + c.cantidad, 0);
     const ref = ult ? ult.capturas : 0;
     if(total > Math.max(50, ref * 3)){
@@ -3301,6 +3398,9 @@ function abrirRevisionTrampa(idLocal){
     aviso("✓ " + etiquetaTrampa(t) + " · " + total + " capturas" + (hechas === act.length ? " · " + t.parcela + " completa" : " · " + hechas + "/" + act.length));
     renderTrampas();
   };
+  const tecl = conectarTeclado("rt", campos.map((c, i) => "rt-n-" + i),
+    (activo, api) => { if(activo < campos.length - 1) api.activar(activo + 1); else guardar(); },
+    activo => { const ok = document.getElementById("rt-ok"); if(ok) ok.textContent = activo < campos.length - 1 ? "Siguiente →" : "Guardar"; });
 
   document.getElementById("rt-retirar").onclick = async () => {
     const ok = await pregunta("Retirar trampa",
@@ -3311,7 +3411,7 @@ function abrirRevisionTrampa(idLocal){
     const x = todas.find(y => y.id_local === t.id_local);
     if(!x) return;
     x.fecha_retirada = new Date().toISOString();
-    if(x.sinc) x.retirada_sinc = false; // ya está en el servidor: hay que enviar la retirada
+    if(x.sinc) x.retirada_sinc = false;
     guardarTrampasLocal(todas);
     cerrar();
     aviso("Trampa retirada");
@@ -3419,6 +3519,8 @@ async function sincronizarTrampas(){
   } finally {
     _sincTrampasEnCurso = false;
     renderTrampas();
+    const vr = document.getElementById("v-res");
+    if(vr && vr.style.display !== "none") renderListaParcelas();
   }
 }
 
@@ -3513,6 +3615,194 @@ async function descargarTrampasServidor(){
   }
 }
 
+
+// ============================================================================
+// v26d: TRAMPAS EN RESUMEN, RECIENTES Y PDF (datos del propio móvil)
+// ============================================================================
+function revisionesDeTrampa(t){
+  return revisionesLocal().filter(r => r.trampa_id_local === t.id_local).sort((a, b) => a.fecha.localeCompare(b.fecha));
+}
+// Capturas por día de cada revisión (días desde la anterior o desde la colocación; mínimo 1 día)
+function serieTrampa(t){
+  let prev = t.fecha_instalacion;
+  return revisionesDeTrampa(t).map(r => {
+    const dias = Math.max(1, (new Date(r.fecha) - new Date(prev)) / 86400000);
+    prev = r.fecha;
+    const cap = totalRevision(r);
+    return {fecha: r.fecha, capturas: cap, dias: dias, porDia: cap / dias, cebo: !!r.cambio_cebo, placa: !!r.cambio_placa};
+  });
+}
+function tendenciaTrampa(serie){
+  if(serie.length < 2) return "";
+  const a = serie[serie.length - 2].porDia, b = serie[serie.length - 1].porDia;
+  if(b > a * 1.2 + 0.1) return "sube";
+  if(b < a * 0.8 - 0.1) return "baja";
+  return "estable";
+}
+const FLECHA = {sube: "↑ sube", baja: "↓ baja", estable: "→ estable", "": ""};
+
+// Resumen: cómo van hoy las trampas, por parcela
+function htmlTrampasHoy(){
+  const act = trampasActivasFinca();
+  if(!act.length) return "";
+  const porParcela = {};
+  act.forEach(t => { (porParcela[t.parcela] = porParcela[t.parcela] || []).push(t); });
+  let html = '<div style="background:#fff;border:1px solid #d5dad8;border-radius:10px;padding:12px;margin-bottom:16px">' +
+    '<div style="font-weight:700;font-size:14px;color:#14181a;margin-bottom:6px">Trampas de hoy</div>';
+  Object.keys(porParcela).sort().forEach(p => {
+    const lista = porParcela[p];
+    const hechas = lista.filter(revisadaHoy).length;
+    const ok = hechas === lista.length;
+    html += '<div onclick="S.traParcela=\'' + p + '\';S.traModo=\'seg\';ir(\'tra\')" style="display:flex;justify-content:space-between;padding:8px 2px;border-top:1px solid #f0f0ee;cursor:pointer;font-size:13px">' +
+      '<b>' + p + '</b><span style="font-weight:600;color:' + (ok ? '#0b6e4f' : '#b8771a') + '">' + (ok ? '✓ ' : '') + hechas + ' de ' + lista.length + ' revisadas</span></div>';
+  });
+  return html + '</div>';
+}
+function textoPendientesTrampas(){
+  const nTr = trampasLocal().filter(t => !t.sinc || t.retirada_sinc === false).length;
+  const nRv = revisionesLocal().filter(r => !r.sinc).length;
+  const partes = [];
+  if(nRv) partes.push(nRv + " revisión(es)");
+  if(nTr) partes.push(nTr + " trampa(s) colocada(s) o retirada(s)");
+  return partes.join(" · ");
+}
+
+// Recientes: trampas con revisiones en los últimos días, por parcela
+function htmlTrampasRecientes(){
+  const fA = fincaActiva();
+  if(!fA) return "";
+  const desde = Date.now() - DIAS_RECIENTES * 86400000;
+  const trampas = trampasLocal().filter(t => t.finca_id === fA.id &&
+    revisionesDeTrampa(t).some(r => new Date(r.fecha).getTime() >= desde));
+  if(!trampas.length) return "";
+  const porParcela = {};
+  trampas.forEach(t => { (porParcela[t.parcela] = porParcela[t.parcela] || []).push(t); });
+  let html = '<div style="margin-top:4px"><h3 style="font-size:13px;color:#0b6e4f;margin:0 0 8px 0;padding-bottom:6px;border-bottom:1px solid #c8dfd2">Trampas · últimos ' + DIAS_RECIENTES + ' días</h3>';
+  Object.keys(porParcela).sort().forEach(p => {
+    html += '<div style="background:#fff;border:1px solid #d5dad8;border-radius:8px;padding:12px;margin-bottom:8px">' +
+      '<div style="font-weight:700;font-size:15px;color:#14181a;margin-bottom:6px">' + p + '</div>';
+    porParcela[p].sort((a, b) => a.plaga_cod.localeCompare(b.plaga_cod) || (a.fila || 0) - (b.fila || 0) || (a.arbol || 0) - (b.arbol || 0)).forEach(t => {
+      const s = serieTrampa(t);
+      const u = s[s.length - 1];
+      const tend = tendenciaTrampa(s);
+      html += '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:5px 0;border-top:1px solid #f0f0ee">' +
+        '<span><b style="color:' + colorTrampa(t.plaga_cod) + '">' + nombrePlaga(t.plaga_cod) + '</b> · ' + etiquetaTrampa(t) + (t.fecha_retirada ? ' <i style="color:#8b9295">(retirada)</i>' : '') + '</span>' +
+        '<span style="white-space:nowrap">' + u.capturas + ' capt. · ' + new Date(u.fecha).toLocaleDateString("es-ES", {day: "2-digit", month: "2-digit"}) +
+        (tend ? ' · <b style="color:' + (tend === "sube" ? "#c33" : tend === "baja" ? "#0b6e4f" : "#5b6467") + '">' + FLECHA[tend] + '</b>' : '') + '</span></div>';
+    });
+    html += '<button class="btn btn-guardar" style="width:100%;padding:10px;font-size:13px;margin-top:8px" onclick="generarPDFTrampas(\'' + p + '\')">📄 PDF de trampas</button></div>';
+  });
+  return html + '</div>';
+}
+
+// PDF de trampas de una parcela: mapa con su posición y evolución de las últimas 2 semanas
+function generarPDFTrampas(parcela){
+  const fA = fincaActiva();
+  const poly = POLIGONOS[parcela];
+  if(!poly){ aviso("No hay polígono cargado para " + parcela); return; }
+  const DIAS = 14;
+  const desde = Date.now() - DIAS * 86400000;
+  const trampas = trampasLocal().filter(t => fA && t.finca_id === fA.id && t.parcela === parcela &&
+    (!t.fecha_retirada || new Date(t.fecha_retirada).getTime() >= desde));
+  if(!trampas.length){ aviso("No hay trampas en " + parcela); return; }
+  try{
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({orientation: "portrait", unit: "mm", format: "a4"});
+    const PW = 210, PH = 297, MG = 15;
+    const rgb = hex => [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+    const fecha = new Date().toLocaleDateString("es-ES", {day: "2-digit", month: "2-digit", year: "numeric"});
+    // Cabecera
+    doc.setFillColor(11, 110, 79);
+    doc.rect(0, 0, PW, 24, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(15);
+    doc.text((fA ? fA.nombre_completo || fA.codigo : "") + " · " + parcela + " · Trampas", MG, 11);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9);
+    doc.text("Evolución de los últimos " + DIAS + " días · generado el " + fecha, MG, 18);
+    let y = 32;
+    const activas = trampas.filter(t => !t.fecha_retirada);
+    const nRev = trampas.reduce((a, t) => a + serieTrampa(t).filter(s => new Date(s.fecha).getTime() >= desde).length, 0);
+    doc.setTextColor(20, 24, 26); doc.setFontSize(10);
+    doc.text(activas.length + " trampa(s) activa(s) · " + nRev + " revisión(es) en el periodo", MG, y);
+    y += 6;
+    // Mapa: polígono y trampas con su fila·árbol
+    // Encuadre: la parcela y todas sus trampas (aunque alguna quede fuera del polígono)
+    const ptsTr = activas.filter(t => t.lat != null);
+    const lons = poly.map(p => p[0]).concat(ptsTr.map(t => t.lon)), lats = poly.map(p => p[1]).concat(ptsTr.map(t => t.lat));
+    const lon0 = Math.min(...lons), lon1 = Math.max(...lons), lat0 = Math.min(...lats), lat1 = Math.max(...lats);
+    const kx = Math.cos(((lat0 + lat1) / 2) * Math.PI / 180);
+    const anchoM = (lon1 - lon0) * kx, altoM = (lat1 - lat0);
+    const cajaW = PW - 2 * MG, cajaH = 85;
+    const esc = Math.min(cajaW / (anchoM || 1), cajaH / (altoM || 1)) * 0.92;
+    const ox = MG + (cajaW - anchoM * esc) / 2, oy = y + (cajaH - altoM * esc) / 2;
+    const px = lon => ox + (lon - lon0) * kx * esc, py = lat => oy + (lat1 - lat) * esc;
+    doc.setDrawColor(220, 220, 220); doc.rect(MG, y, cajaW, cajaH);
+    doc.setDrawColor(11, 110, 79); doc.setLineWidth(0.6);
+    for(let i = 0; i < poly.length - 1; i++) doc.line(px(poly[i][0]), py(poly[i][1]), px(poly[i + 1][0]), py(poly[i + 1][1]));
+    doc.setLineWidth(0.2);
+    activas.forEach(t => {
+      if(t.lat == null) return;
+      const c = rgb(colorTrampa(t.plaga_cod));
+      doc.setFillColor(c[0], c[1], c[2]);
+      doc.circle(px(t.lon), py(t.lat), 2.2, "F");
+      doc.setFontSize(7); doc.setTextColor(20, 24, 26);
+      doc.text(etiquetaCorta(t), px(t.lon) + 3, py(t.lat) + 1);
+    });
+    y += cajaH + 6;
+    // Leyenda de especies
+    const especiesP = [...new Set(trampas.map(t => t.plaga_cod))];
+    let lx = MG;
+    especiesP.forEach(cod => {
+      const c = rgb(colorTrampa(cod));
+      doc.setFillColor(c[0], c[1], c[2]); doc.circle(lx + 1.5, y - 1, 1.5, "F");
+      doc.setFontSize(8); doc.setTextColor(20, 24, 26); doc.text(nombrePlaga(cod), lx + 4.5, y);
+      lx += doc.getTextWidth(nombrePlaga(cod)) + 12;
+    });
+    y += 7;
+    // Tabla por especie
+    const cab = () => {
+      doc.setFillColor(242, 244, 243); doc.rect(MG, y - 4, PW - 2 * MG, 6, "F");
+      doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(91, 100, 103);
+      doc.text("TRAMPA", MG + 2, y); doc.text("REVISIONES (capturas)", MG + 32, y);
+      doc.text("CAPT./DÍA", MG + 132, y); doc.text("TENDENCIA", MG + 155, y);
+      doc.setFont("helvetica", "normal");
+      y += 6;
+    };
+    especiesP.forEach(cod => {
+      if(y > PH - 30){ doc.addPage(); y = 20; }
+      doc.setFont("helvetica", "bold"); doc.setFontSize(10);
+      const c = rgb(colorTrampa(cod)); doc.setTextColor(c[0], c[1], c[2]);
+      doc.text(nombrePlaga(cod), MG, y); y += 5;
+      cab();
+      trampas.filter(t => t.plaga_cod === cod).sort((a, b) => (a.fila || 0) - (b.fila || 0) || (a.arbol || 0) - (b.arbol || 0)).forEach(t => {
+        if(y > PH - 20){ doc.addPage(); y = 20; cab(); }
+        const s = serieTrampa(t);
+        const enPeriodo = s.filter(x => new Date(x.fecha).getTime() >= desde);
+        const u = s[s.length - 1];
+        doc.setFontSize(8.5); doc.setTextColor(20, 24, 26);
+        doc.text(etiquetaCorta(t) === "?" ? "Sin fila/árbol" : "F" + t.fila + " · A" + t.arbol, MG + 2, y);
+        const txtRev = enPeriodo.length
+          ? enPeriodo.slice(-5).map(x => new Date(x.fecha).toLocaleDateString("es-ES", {day: "2-digit", month: "2-digit"}) + ": " + x.capturas + (x.cebo ? " (cebo)" : "") + (x.placa ? " (placa)" : "")).join("   ")
+          : (t.ultima_revision ? "Sin revisiones en este móvil · última " + new Date(t.ultima_revision).toLocaleDateString("es-ES", {day: "2-digit", month: "2-digit"}) + ": " + (t.ultimas_capturas || 0) : "Sin revisiones");
+        doc.text(doc.splitTextToSize(txtRev, 96)[0], MG + 32, y);
+        doc.text(u ? u.porDia.toFixed(1) : "-", MG + 132, y);
+        const tend = tendenciaTrampa(s);
+        doc.text(tend || "-", MG + 155, y);
+        y += 6;
+      });
+      y += 3;
+    });
+    doc.setFontSize(7.5); doc.setTextColor(139, 146, 149);
+    doc.text("Datos registrados en este dispositivo. El histórico completo y el análisis están en el dashboard.", MG, PH - 10);
+    const nombre = "TRAMPAS_" + parcela + "_" + new Date().toISOString().slice(0, 10) + ".pdf";
+    doc.save(nombre);
+    aviso("PDF generado: " + nombre);
+  } catch(e){
+    console.error("Error PDF trampas:", e);
+    aviso("No se pudo generar el PDF: " + e.message);
+  }
+}
+
 function ir(v){
   // al salir de admin, resetear S.admin para forzar PIN de nuevo la próxima vez
   if(v !== "admin" && S.admin){
@@ -3559,14 +3849,22 @@ function renderListaParcelas(){
 
   // SECCIÓN PENDIENTES DE ENVIAR (arriba del todo, destacada)
   const pendientes = muestreosPendientesEnvio();
+  const nPendTrampas = nPendientesTrampas();   // v26d: las trampas se envían también desde aquí
   let htmlPendientes = "";
-  if(pendientes.length > 0){
+  if(pendientes.length > 0 || nPendTrampas > 0){
     const online = navigator.onLine;
     const fA = fincaActiva();
     const sinFinca = !fA;
     htmlPendientes += '<div style="background:#fff5e0;border:2px solid #e6c98a;border-radius:10px;padding:14px;margin-bottom:16px">';
-    htmlPendientes += '<div style="font-weight:700;font-size:15px;color:#7a5230;margin-bottom:8px">⚠ ' + pendientes.length + ' muestreo(s) pendiente(s) de enviar</div>';
-    htmlPendientes += '<div style="font-size:11px;color:#7a5230;margin-bottom:10px">Están cerrados y no se pueden modificar. Envíalos al servidor cuando tengas conexión.</div>';
+    const titulo = [];
+    if(pendientes.length) titulo.push(pendientes.length + ' muestreo(s)');
+    if(nPendTrampas) titulo.push(nPendTrampas + ' cambio(s) de trampas');
+    htmlPendientes += '<div style="font-weight:700;font-size:15px;color:#7a5230;margin-bottom:8px">⚠ Pendiente de enviar: ' + titulo.join(' y ') + '</div>';
+    htmlPendientes += '<div style="font-size:11px;color:#7a5230;margin-bottom:10px">Envíalo al servidor cuando tengas conexión.</div>';
+    if(nPendTrampas){
+      htmlPendientes += '<div style="background:#fff;border:1px solid #e6c98a;border-radius:6px;padding:8px 10px;margin-bottom:6px;font-size:12px">' +
+        '<b style="color:#14181a">Trampas</b> · ' + textoPendientesTrampas() + '</div>';
+    }
     // Lista de pendientes
     pendientes.forEach(p => {
       const nSacs = sacudidasDeMuestreo(p.id).length;
@@ -3583,10 +3881,11 @@ function renderListaParcelas(){
       htmlPendientes += '<div style="text-align:center;margin-top:8px"><button class="btn btn-guardar" style="width:100%;padding:12px;background:#aaa;cursor:not-allowed" disabled>⬆ Enviar al servidor</button></div>';
       htmlPendientes += '<div style="text-align:center;font-size:11px;color:#c33;margin-top:6px;font-weight:600">🔴 Sin conexión — espera a tener wifi o datos móviles</div>';
     } else {
-      htmlPendientes += '<div style="text-align:center;margin-top:8px"><button class="btn btn-guardar" style="width:100%;padding:12px" onclick="enviarPendientes()">⬆ Enviar al servidor (' + pendientes.length + ')</button></div>';
+      htmlPendientes += '<div style="text-align:center;margin-top:8px"><button class="btn btn-guardar" style="width:100%;padding:12px" onclick="enviarPendientes()">⬆ Enviar al servidor (' + (pendientes.length + nPendTrampas) + ')</button></div>';
     }
     htmlPendientes += '</div>';
   }
+  htmlPendientes += htmlTrampasHoy();   // v26d
 
   if(msHoy.length === 0){
     let contenido = htmlPendientes;
@@ -3676,9 +3975,10 @@ function renderRecientes(){
   const c = document.getElementById("lista-recientes");
   if(!c) return;
   const items = muestreosRecientes();
+  const bloqueTrampas = htmlTrampasRecientes();   // v26d
 
   if(items.length === 0){
-    c.innerHTML = '<div class="vacio">Sin muestreos archivados en los últimos ' + DIAS_RECIENTES + ' días.<br><br><span style="font-size:12px;color:#8b9295">Aquí aparecerán los muestreos ya finalizados y archivados desde tu jornada.</span></div>';
+    c.innerHTML = bloqueTrampas + '<div class="vacio">Sin muestreos archivados en los últimos ' + DIAS_RECIENTES + ' días.<br><br><span style="font-size:12px;color:#8b9295">Aquí aparecerán los muestreos ya finalizados y archivados desde tu jornada.</span></div>';
     return;
   }
 
@@ -3733,7 +4033,7 @@ function renderRecientes(){
     });
   });
 
-  c.innerHTML = html;
+  c.innerHTML = bloqueTrampas + html;
 }
 
 // PURGA AUTOMÁTICA de muestreos > DIAS_RECIENTES días
