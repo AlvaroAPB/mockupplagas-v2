@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  ============================================================================
+  =========================== =================================================
   MONITOREO DE PLAGAS · RoyAgrico
   ----------------------------------------------------------------------------
   Aplicación web (PWA) para captura de datos de monitoreo de plagas en campo.
@@ -23,8 +23,91 @@
   Autor: Álvaro Parra Bocccoli
 
   ----------------------------------------------------------------------------
-  VERSIÓN v25c (fork experimental)
+  VERSIÓN v26c
   ----------------------------------------------------------------------------
+  Cambios respecto a v26b (tras la prueba en campo):
+
+  1) TRAMPAS: nada se conecta solo. Guardar = solo en el móvil.
+     - "Enviar al servidor": botón explícito.
+     - "Cargar": botón explícito. La app solo COMPRUEBA en silencio (lectura)
+       si el servidor tiene trampas que el móvil no tiene, y lo avisa.
+  2) TRAMPAS: dos pantallas.
+     - Seguimiento: parcela (por GPS o elegida), mapa con las trampas numeradas
+       por fila·árbol, la más cercana destacada, ✓ al revisar, progreso
+       "3 de 5 revisadas hoy" y propuesta de siguiente parcela al completar.
+     - Colocación: mapa + especie, FILA y ÁRBOL obligatorios (enteros), nota.
+       Código legible PARCELA-ESPECIE-FxAy. Se elimina el tipo de trampa.
+  3) VALIDACIÓN DE POSICIÓN con los polígonos (sacudidas y colocación):
+     dentro / borde (margen = máx(15 m, precisión GPS), tope 30 m) / lejos
+     (pide confirmación) / dentro de otra parcela (no deja, ofrece cambiar).
+     En sacudidas solo interrumpe cuando cambia la situación; una franja
+     indica el estado. En revisión de trampas: aviso si estás a más de 25 m
+     de la trampa.
+
+  ----------------------------------------------------------------------------
+  VERSIÓN v26b
+  ----------------------------------------------------------------------------
+  Cambios respecto a v26a:
+
+  1) NUEVA PESTAÑA "TRAMPAS" (seguimiento de vuelos):
+     - Las especies trampeables salen de catalogo_registros (organo TRAMPA):
+       añadir una especie no requiere tocar código.
+     - El plaguero da de alta cada trampa en campo: parcela, especie, tipo
+       y posición GPS (obligatoria). Código automático PARCELA-ESPECIE-n.
+     - Revisión: número tecleado (teclado numérico, sin +/-), cambio de
+       placa, cambio de cebo y nota. El 0 también se registra.
+     - Aviso de posible error de tecleo si el número se dispara respecto a
+       la revisión anterior.
+     - Estado: verde si revisada en los últimos 7 días, ámbar si toca.
+       Fuera de temporada las trampas se retiran (no generan avisos).
+     - Offline + sincronización idempotente (id_local): reintentar nunca
+       duplica trampas, revisiones ni capturas.
+     - Las trampas aparecen en el mapa.
+  2) SACUDIR ignora los registros de trampa (Piojo de San José no aparece).
+
+  ----------------------------------------------------------------------------
+  VERSIÓN v26a
+  ----------------------------------------------------------------------------
+  Cambios respecto a v25d (versión integrada por IT, esquema segPlagas):
+
+  1) MODELO DE REGISTROS (qué · dónde · qué se registra):
+     - Lee catalogo_registros: para cada plaga, qué combinaciones
+       órgano · tipo están permitidas (SACUDIDA/ARBOL/HOJA/FRUTO/BROTE/
+       MADERA/FLOR · individuos/presencia/daño).
+     - La pantalla solo ofrece lo permitido para cada plaga.
+     - Individuos en sacudida: contadores (como antes, en sac.plagas).
+     - Presencia y daño: interruptor Sí/No (nuevo, en sac.obs).
+     - Plagas con un único registro de sacudida y sin subtipos siguen
+       siendo un toque directo.
+  2) REGLAS CONSISTENTES CON LA BD (vista v_catalogo_registros):
+     - Incidencia ("con capturas"): plagas y enfermedades. Los auxiliares
+       NUNCA cuentan.
+     - Focos: solo individuos de categoría plaga (auxiliares excluidos).
+  3) SINCRONIZACIÓN: cada captura envía registro_id. Si el dispositivo
+     tiene un catálogo antiguo para alguna observación, la sincronización
+     se detiene ANTES de escribir nada en el servidor.
+  4) PDF: nuevo bloque "Observaciones (presencia / daño)". Excel: columnas
+     subtipo_cod, organo y tipo (exportación e importación).
+  5) Compatibilidad: con un catálogo descargado antes de v26a, la app
+     funciona exactamente como v25d hasta pulsar "Actualizar catálogos".
+
+  ----------------------------------------------------------------------------
+  VERSIÓN v25d (fork experimental)
+  ----------------------------------------------------------------------------
+  Cambios respecto a v25c:
+
+  1) AGRUPACIÓN DE SUB-PARCELAS EN EL MAPA:
+     - Detección automática de polígonos con geometría idéntica.
+     - Ejemplo: COI27A + COI27B + COI27C → en el mapa se ve UNA sola
+       parcela etiquetada "COI27" (prefijo común).
+     - El tooltip muestra las sub-parcelas: "COI27 (A, B, C)".
+     - El selector de parcelas SIGUE mostrando A/B/C individualmente
+       (se respeta Hispatec, la sub-parcela se elige al muestrear).
+     - Al clicar un polígono agrupado, se pide al usuario que elija
+       la sub-parcela en el selector (no autoselección arbitraria).
+     - GPS: si detecta la zona de un grupo, avisa del prefijo
+       "El GPS te sitúa en COI27 (elige: COI27A, COI27B, COI27C)".
+
   Cambios respecto a v25b:
 
   1) FLUJO REORGANIZADO en Admin (mapa por finca):
@@ -74,7 +157,7 @@
 <link rel="manifest" href="./manifest.json">
 <link rel="apple-touch-icon" href="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='24' fill='%230b6e4f'/%3E%3Ctext x='96' y='132' font-family='sans-serif' font-size='110' font-weight='700' text-anchor='middle' fill='%23fff'%3EM%3C/text%3E%3C/svg%3E">
 <link rel="icon" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="10" fill="%230b6e4f"/><text x="32" y="45" font-family="sans-serif" font-size="38" font-weight="700" text-anchor="middle" fill="%23fff">S</text></svg>'>
-<title>Monitoreo de plagas · v25c</title>
+<title>Monitoreo de plagas · v26c</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -152,6 +235,7 @@ select.parcela{width:100%;padding:12px 14px;border:2px solid #d5dad8;border-radi
 .tabs{display:flex;background:#fff;border-bottom:1px solid #d5dad8;position:sticky;top:56px;z-index:9}
 .tabs button{flex:1;padding:12px;border:none;background:none;font-size:14px;font-weight:600;color:#5b6467;border-bottom:3px solid transparent;cursor:pointer}
 .tabs button.on{color:#0b6e4f;border-color:#0b6e4f}
+@media (max-width:480px){ .tabs button{padding:12px 2px;font-size:13px;white-space:nowrap} }
 table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{padding:7px 8px;border-bottom:1px solid #eee;text-align:left}
 th{background:#f7f9f8;color:#5b6467;font-size:10px;text-transform:uppercase;letter-spacing:.4px}
@@ -185,7 +269,27 @@ td b{color:#0b6e4f}
 </style>
 </head>
 <body>
+<!-- Modal / Pantalla de Login -->
+<div id="login-overlay" style="display:none; position:fixed; inset:0; background:rgba(20,24,26,0.85); z-index:99999; align-items:center; justify-content:center; padding:20px;">
+  <div style="background:#fff; border-radius:12px; padding:24px; max-width:380px; width:100%; box-shadow:0 10px 30px rgba(0,0,0,0.3)">
+    <h3 style="margin:0 0 8px; color:#0b6e4f; font-size:18px;">🔒 Acceso Restringido</h3>
+    <p style="font-size:13px; color:#5b6467; margin-bottom:16px;">Introduce tus credenciales de campouser para acceder.</p>
+    
+    <label style="font-size:12px; color:#5b6467; display:block; margin-bottom:8px;">
+      Correo electrónico
+      <input type="email" id="login-email" value="campo@royal.es" style="width:100%; padding:10px; border:1px solid #d5dad8; border-radius:6px; margin-top:4px; font-size:14px; box-sizing:border-box;">
+    </label>
 
+    <label style="font-size:12px; color:#5b6467; display:block; margin-bottom:16px;">
+      Contraseña
+      <input type="password" id="login-pass" placeholder="••••••••" style="width:100%; padding:10px; border:1px solid #d5dad8; border-radius:6px; margin-top:4px; font-size:14px; box-sizing:border-box;">
+    </label>
+
+    <div id="login-error" style="display:none; color:#c33; font-size:12px; margin-bottom:12px; background:#fdecea; padding:8px; border-radius:6px;"></div>
+
+    <button onclick="ejecutarLogin()" style="width:100%; padding:12px; background:#0b6e4f; color:#fff; border:none; border-radius:8px; font-size:14px; font-weight:700; cursor:pointer;">Entrar</button>
+  </div>
+</div>
 <header style="position:relative">
   <div>
     <div class="t">Monitoreo de plagas · <span id="cabFincaLabel" style="font-weight:700">—</span></div>
@@ -194,12 +298,14 @@ td b{color:#0b6e4f}
   <div style="display:flex;gap:6px">
     <button class="chip" id="chip-red">Red</button>
     <button class="chip" id="chip-gps" onclick="pedirGPS()">📍 Activar GPS</button>
+	<button class="chip" onclick="cerrarSesionApp()" style="background:rgba(179,38,30,0.4);color:#fff;" title="Cerrar sesión">🚪 Salir</button>
   </div>
-  <div style="position:absolute;bottom:2px;right:6px;font-size:8px;color:rgba(255,255,255,0.45);font-weight:500;letter-spacing:0.3px">v25c</div>
+  <div style="position:absolute;bottom:2px;right:6px;font-size:8px;color:rgba(255,255,255,0.45);font-weight:500;letter-spacing:0.3px">v26c</div>
 </header>
 
 <div class="tabs">
   <button id="t-sac" class="on" onclick="ir('sac')">Sacudir</button>
+  <button id="t-tra" onclick="ir('tra')">Trampas</button>
   <button id="t-mapa" onclick="ir('mapa')">Mapa</button>
   <button id="t-res" onclick="ir('res')">Resumen</button>
   <button id="t-rec" onclick="ir('rec')">Recientes</button>
@@ -217,6 +323,8 @@ td b{color:#0b6e4f}
         <span id="parcela-detect-txt">El GPS te sitúa en otra parcela</span>
         <button onclick="usarDetectada()">Cambiar</button>
       </div>
+
+      <div id="franja-pos" style="display:none"></div>
 
       <div id="finalizada-aviso" class="finalizada-aviso" style="display:none"></div>
 
@@ -256,6 +364,10 @@ td b{color:#0b6e4f}
     </div>
   </section>
 
+  <section id="v-tra" style="display:none">
+    <div id="trampas-cont"></div>
+  </section>
+
   <section id="v-mapa" style="display:none">
     <div id="mapa-grande" class="mapa-grande"></div>
     <div class="mapa-leyenda">
@@ -263,6 +375,7 @@ td b{color:#0b6e4f}
       <span><i style="background:#0b6e4f"></i>Sin capturas</span>
       <span><i style="background:#d9a520"></i>Con capturas</span>
       <span><i style="background:#1b5e9e"></i>Tu posición GPS</span>
+      <span><i style="background:#b8771a;border-radius:2px"></i>Trampa</span>
     </div>
     <div class="card" style="margin-top:12px">
       <div id="mapa-info" class="vacio">Toca un polígono para ir a esa parcela</div>
@@ -308,6 +421,71 @@ td b{color:#0b6e4f}
 <div class="toast" id="toast"></div>
 
 <script>
+// ============ CONTROL DE SESIÓN Y LOGIN ============
+
+function verificarSesionOAnular(){
+  const token = localStorage.getItem("segplagas_jwt");
+  const overlay = document.getElementById("login-overlay");
+  
+  if(!token){
+    // Si no hay token, mostramos el formulario de login y bloqueamos la app
+    if(overlay) overlay.style.display = "flex";
+    return false;
+  }
+  
+  if(overlay) overlay.style.display = "none";
+  return true;
+}
+
+async function ejecutarLogin(){
+  const email = document.getElementById("login-email").value.trim();
+  const password = document.getElementById("login-pass").value;
+  const errDiv = document.getElementById("login-error");
+  
+  errDiv.style.display = "none";
+
+  try {
+    const response = await fetch(SUPABASE_URL + "/auth/v1/token?grant_type=password", {
+      method: "POST",
+      headers: {
+        "apikey": SUPABASE_KEY,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ email: email, password: password })
+    });
+
+    // Capturamos el texto de la respuesta para ver el motivo exacto
+    const responseText = await response.text();
+    console.log("Respuesta de login:", response.status, responseText);
+
+    if (!response.ok) {
+      throw new Error("Error " + response.status + ": " + responseText);
+    }
+
+    const data = JSON.parse(responseText);
+    localStorage.setItem("segplagas_jwt", data.access_token);
+    
+    document.getElementById("login-overlay").style.display = "none";
+    aviso("✓ Sesión iniciada correctamente");
+    init();
+
+  } catch(e) {
+    errDiv.textContent = e.message;
+    errDiv.style.display = "block";
+  }
+}
+
+function cerrarSesionApp() {
+  // Borramos el token JWT del almacenamiento local
+  localStorage.removeItem("segplagas_jwt");
+  aviso("Sesión cerrada correctamente");
+  
+  // Recargamos la app para que aparezca automáticamente el formulario de login
+  setTimeout(() => {
+    location.reload();
+  }, 800);
+}
+
 "use strict";
 
 const PIN_ADMIN = "2468";
@@ -338,12 +516,22 @@ function cargarCatalogoDesdeStorage(){
 }
 
 async function descargarCatalogoDesdeSupabase(){
-  // Descarga plagas + subtipos, los estructura, guarda en localStorage y refresca CATALOGO
-  const [plagas, subtipos] = await Promise.all([
-    supabaseGet("catalogo_plagas", "select=id,codigo,nombre,orden,activo&order=orden.asc"),
-    supabaseGet("catalogo_subtipos", "select=id,plaga_id,codigo,nombre,orden,activo_para_foco&order=orden.asc")
-  ]);
-  // Construir estructura idéntica al hardcoded: [{cod, n, subs?:[{cod, n, activo}]}]
+  // v26a: plagas (+categoría) + subtipos + registros permitidos (órgano · tipo)
+  let plagas;
+  try{
+    plagas = await supabaseGet("catalogo_plagas", "select=id,codigo,nombre,orden,activo,categoria&order=orden.asc");
+  } catch(e){
+    console.warn("catalogo_plagas sin columna categoria, modo compatible:", e.message);
+    plagas = await supabaseGet("catalogo_plagas", "select=id,codigo,nombre,orden,activo&order=orden.asc");
+  }
+  const subtipos = await supabaseGet("catalogo_subtipos", "select=id,plaga_id,codigo,nombre,orden,activo_para_foco&order=orden.asc");
+  let registros = null;
+  try{
+    registros = await supabaseGet("catalogo_registros", "select=id,plaga_id,organo,tipo,por_subtipo,orden,activo&order=orden.asc");
+  } catch(e){
+    console.warn("catalogo_registros no disponible, modo compatible:", e.message);
+  }
+  // Estructura: [{cod, n, cat, subs?:[{cod, n, activo}], regs?:[{id, organo, tipo, por_sub, orden, activo}]}]
   const subtiposPorPlaga = {};
   subtipos.forEach(s => {
     const parent = plagas.find(p => p.id === s.plaga_id);
@@ -355,13 +543,30 @@ async function descargarCatalogoDesdeSupabase(){
       activo: !!s.activo_para_foco
     });
   });
+  const registrosPorPlaga = {};
+  if(registros){
+    registros.forEach(r => {
+      const parent = plagas.find(p => p.id === r.plaga_id);
+      if(!parent) return;
+      if(!registrosPorPlaga[parent.codigo]) registrosPorPlaga[parent.codigo] = [];
+      registrosPorPlaga[parent.codigo].push({
+        id: r.id, organo: r.organo, tipo: r.tipo,
+        por_sub: !!r.por_subtipo, orden: r.orden, activo: r.activo !== false
+      });
+    });
+  }
   const cat = plagas
     .filter(p => p.activo)
     .map(p => {
-      const entry = { cod: p.codigo, n: p.nombre };
+      const entry = {
+        cod: p.codigo,
+        n: p.nombre,
+        cat: p.categoria || (p.codigo === "AUX" ? "auxiliar" : "plaga")
+      };
       if(subtiposPorPlaga[p.codigo] && subtiposPorPlaga[p.codigo].length > 0){
         entry.subs = subtiposPorPlaga[p.codigo];
       }
+      if(registros) entry.regs = registrosPorPlaga[p.codigo] || [];
       return entry;
     });
   // Cache mapas de IDs también (para sincronización con Supabase)
@@ -372,15 +577,93 @@ async function descargarCatalogoDesdeSupabase(){
     const parent = plagas.find(p => p.id === s.plaga_id);
     if(parent) subtiposIdMap[parent.codigo + "|" + s.codigo] = s.id;
   });
+  const registrosIdMap = {};
+  if(registros){
+    registros.forEach(r => {
+      const parent = plagas.find(p => p.id === r.plaga_id);
+      if(parent) registrosIdMap[parent.codigo + "|" + r.organo + "|" + r.tipo] = r.id;
+    });
+  }
   _plagasIdMap = plagasIdMap;
   _subtiposIdMap = subtiposIdMap;
+  _registrosIdMap = registrosIdMap;
   localStorage.setItem("monitoreo.plagas_map", JSON.stringify(plagasIdMap));
   localStorage.setItem("monitoreo.subtipos_map", JSON.stringify(subtiposIdMap));
+  localStorage.setItem("monitoreo.registros_map", JSON.stringify(registrosIdMap));
   // Guardar catálogo y refrescar variable global
   localStorage.setItem(K_CATALOGO, JSON.stringify(cat));
   localStorage.setItem(K_CATALOGO_DESC, new Date().toISOString());
   CATALOGO = cat;
   return cat;
+}
+
+// ============ v26a: HELPERS DEL MODELO DE REGISTROS ============
+// Una captura se describe por: plaga (+subtipo) · órgano · tipo.
+//  - Individuos en SACUDIDA -> sac.plagas (estructura histórica, sin cambios).
+//  - Resto (presencia, daño, otros órganos) -> sac.obs, clave "COD|ORGANO|TIPO|SUBCOD".
+const ORGANO_LBL = {SACUDIDA:"Sacudida", ARBOL:"Árbol", HOJA:"Hoja", FRUTO:"Fruto", BROTE:"Brote", MADERA:"Madera", FLOR:"Flor", TRAMPA:"Trampa"};
+const TIPO_LBL = {individuos:"nº individuos", presencia:"presencia", dano:"daño"};
+let _registrosIdMap = null;
+
+// Registros de una plaga. Catálogo antiguo (sin regs) -> se comporta como v25d.
+function regsDe(p){
+  if(p && Array.isArray(p.regs)) return p.regs;
+  return [{id:null, organo:"SACUDIDA", tipo:"individuos", por_sub: !!(p && p.subs), orden:1, activo:true}];
+}
+function regsActivos(p){ return regsDe(p).filter(r => r.activo !== false); }
+// v26b: registros de la pantalla Sacudir (excluye TRAMPA, que tiene su propia pestaña)
+function regsSacudir(p){ return regsActivos(p).filter(r => r.organo !== "TRAMPA"); }
+function regSacudida(p){ return regsSacudir(p).find(r => r.organo === "SACUDIDA" && r.tipo === "individuos") || null; }
+function regsObs(p){ return regsSacudir(p).filter(r => !(r.organo === "SACUDIDA" && r.tipo === "individuos")); }
+function regTrampa(p){ return regsActivos(p).find(r => r.organo === "TRAMPA") || null; }
+// Toque directo: solo individuos en sacudida, sin subtipos que desglosar
+function esDirecto(p){
+  const rs = regSacudida(p);
+  return !!rs && regsObs(p).length === 0 && !(p.subs && rs.por_sub);
+}
+function catDe(cod){
+  const p = CATALOGO.find(x => x.cod === cod);
+  if(p && p.cat) return p.cat;
+  return cod === "AUX" ? "auxiliar" : "plaga";
+}
+function esAuxiliar(cod){ return catDe(cod) === "auxiliar"; }
+function claveObs(cod, organo, tipo, subCod){ return cod + "|" + organo + "|" + tipo + "|" + (subCod || ""); }
+function parseClaveObs(k){
+  const [cod, organo, tipo, subCod] = String(k).split("|");
+  return {cod, organo, tipo, subCod: subCod || ""};
+}
+function etiquetaObs(k){
+  const o = parseClaveObs(k);
+  const p = CATALOGO.find(x => x.cod === o.cod);
+  let t = p ? p.n : o.cod;
+  if(o.subCod && p && p.subs){
+    const s = p.subs.find(x => x.cod === o.subCod);
+    t += " " + (s ? s.n : o.subCod).toLowerCase();
+  }
+  return t + " · " + (ORGANO_LBL[o.organo] || o.organo) + " · " + (TIPO_LBL[o.tipo] || o.tipo);
+}
+function getRegistroId(cod, organo, tipo){
+  if(!_registrosIdMap){
+    try{ _registrosIdMap = JSON.parse(localStorage.getItem("monitoreo.registros_map") || "null"); } catch{}
+  }
+  return _registrosIdMap ? (_registrosIdMap[cod + "|" + organo + "|" + tipo] || null) : null;
+}
+// Incidencia = lo que cuenta como "con capturas": plagas y enfermedades, nunca auxiliares
+function incidenciaEn(sac){
+  if(!sac) return 0;
+  let n = 0;
+  Object.keys(sac.plagas || {}).forEach(cod => {
+    if(!esAuxiliar(cod)) n += cantSacudida(sac, cod);
+  });
+  Object.entries(sac.obs || {}).forEach(([k, v]) => {
+    if(v > 0 && !esAuxiliar(parseClaveObs(k).cod)) n += 1;
+  });
+  return n;
+}
+function obsMarcadasDe(cod){
+  return Object.entries(S.obsActual || {})
+    .filter(([k, v]) => v > 0 && k.startsWith(cod + "|"))
+    .map(([k]) => k);
 }
 
 const RAZONES_FIN = [
@@ -393,7 +676,7 @@ const RAZONES_FIN = [
 const K_SAC = "monitoreo.sacudidas";
 const K_MUESTREOS = "monitoreo.muestreos";
 const K_POLIGONOS = "monitoreo.poligonos";
-const K_POLIGONOS_META = "monitoreo.poligonos_meta";  // v25c: metadata (finca_id) por parcela
+const K_POLIGONOS_META = "monitoreo.poligonos_meta";  // v25d: metadata (finca_id) por parcela
 const K_PLAGUERO = "monitoreo.plaguero";
 const K_FINCAS = "monitoreo.fincas";           // Cache local de fincas (desde Supabase)
 const K_FINCA_ACTIVA = "monitoreo.finca_activa";   // ID de la finca activa
@@ -460,37 +743,121 @@ function borrarDestinatario(email){
 
 
 // ============ CONFIGURACIÓN SUPABASE ============
-const SUPABASE_URL = "https://wocjkxmwhcgdjefygigg.supabase.co";
-const SUPABASE_KEY = "sb_publishable_2Zo3VxKwH2OrWboQNC1bcg_xc7eMrir";
 
-// Helper para hacer peticiones REST a Supabase
-async function supabaseGet(tabla, params = ""){
+const SUPABASE_URL = "https://api-camposatroyal.duckdns.org";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzkxMzg0MTQ0LCJleHAiOjE5NDkwNjQxNDR9.M8KhCBRAc3b_M0JPT09QD1weNG4uVI7ghb4W9WTjZTI";
+
+// ============ GESTIÓN DE TOKEN Y REFRESH ============
+
+async function asegurarTokenVigente() {
+  // Opcional: si guardas el refresh_token, puedes intentar renovar el JWT aquí.
+  // Si solo manejas el access_token, comprobamos si hay sesión o redirigimos al login.
+  const token = localStorage.getItem("segplagas_jwt");
+  if (!token) {
+    throw new Error("Sesión no iniciada (JWT ausente)");
+  }
+  return token;
+}
+
+// Helper genérico con reintentos para manejar microcortes en datos móviles
+async function fetchConReintentos(url, options, maxReintentos = 3) {
+  let intento = 0;
+  while (intento < maxReintentos) {
+    try {
+      const resp = await fetch(url, options);
+      
+      // Si el token ha expirado (401 Unauthorized)
+      if (resp.status === 401) {
+        // Marcamos que la sesión expiró y abrimos el login si es necesario
+        localStorage.removeItem("segplagas_jwt");
+        const overlay = document.getElementById("login-overlay");
+        if (overlay) overlay.style.display = "flex";
+        throw new Error("JWT expirado o sesión inválida. Inicia sesión de nuevo.");
+      }
+
+      return resp;
+    } catch (err) {
+      intento++;
+      // Si es un error de red (pérdida temporal de cobertura móvil) y quedan intentos
+      if ((err.name === "TypeError" || err.message.includes("Failed to fetch")) && intento < maxReintentos) {
+        // Esperamos un tiempo exponencial antes de reintentar (1s, 2s, 4s...)
+        const espera = Math.pow(2, intento) * 1000;
+        console.warn(`[Red móvil] Fallo de conexión. Reintento ${intento}/${maxReintentos} en ${espera}ms...`);
+        await new Promise(res => setTimeout(res, espera));
+      } else {
+        throw err;
+      }
+    }
+  }
+}
+
+// ============ REST SUPABASE MEJORADO ============
+
+async function supabaseGet(tabla, params = "") {
+  const tokenJWT = await asegurarTokenVigente();
   const url = SUPABASE_URL + "/rest/v1/" + tabla + (params ? "?" + params : "");
-  const resp = await fetch(url, {
+  
+  const resp = await fetchConReintentos(url, {
     method: "GET",
     headers: {
       "apikey": SUPABASE_KEY,
-      "Authorization": "Bearer " + SUPABASE_KEY,
-      "Content-Type": "application/json"
+      "Authorization": "Bearer " + tokenJWT,
+      "Content-Type": "application/json",
+      "Accept-Profile": "segPlagas"
     }
   });
-  if(!resp.ok) throw new Error("Supabase GET " + tabla + ": " + resp.status + " " + await resp.text());
+
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error("Supabase GET " + tabla + ": " + resp.status + " " + errText);
+  }
   return resp.json();
 }
 
-async function supabasePost(tabla, filas){
+async function supabasePost(tabla, filas) {
+  const tokenJWT = await asegurarTokenVigente();
   const url = SUPABASE_URL + "/rest/v1/" + tabla;
-  const resp = await fetch(url, {
+  
+  const resp = await fetchConReintentos(url, {
     method: "POST",
     headers: {
       "apikey": SUPABASE_KEY,
-      "Authorization": "Bearer " + SUPABASE_KEY,
+      "Authorization": "Bearer " + tokenJWT,
       "Content-Type": "application/json",
-      "Prefer": "return=representation"
+      "Prefer": "return=representation",
+      "Accept-Profile": "segPlagas",
+      "Content-Profile": "segPlagas"
     },
     body: JSON.stringify(Array.isArray(filas) ? filas : [filas])
   });
-  if(!resp.ok) throw new Error("Supabase POST " + tabla + ": " + resp.status + " " + await resp.text());
+
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error("Supabase POST " + tabla + ": " + resp.status + " " + errText);
+  }
+  return resp.json();
+}
+
+// v26b: PATCH (solo se usa para la fecha de retirada de trampas)
+async function supabasePatch(tabla, filtro, datos) {
+  const tokenJWT = await asegurarTokenVigente();
+  const url = SUPABASE_URL + "/rest/v1/" + tabla + "?" + filtro;
+  const resp = await fetchConReintentos(url, {
+    method: "PATCH",
+    headers: {
+      "apikey": SUPABASE_KEY,
+      "Authorization": "Bearer " + tokenJWT,
+      "Content-Type": "application/json",
+      "Prefer": "return=representation",
+      "Accept-Profile": "segPlagas",
+      "Content-Profile": "segPlagas"
+    },
+    body: JSON.stringify(datos)
+  });
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error("Supabase PATCH " + tabla + ": " + resp.status + " " + errText);
+  }
   return resp.json();
 }
 
@@ -652,7 +1019,7 @@ let PRECARGA = {activa: false, cancelar: false};
 
 // ============ PRECARGA OFFLINE ============
 async function abrirPrecarga(){
-  // v25c: usar solo polígonos de la finca activa para no descargar
+  // v25d: usar solo polígonos de la finca activa para no descargar
   // tiles de zonas intermedias entre fincas dispersas geográficamente.
   const poliActivos = poligonosDeFincaActiva();
   if(Object.keys(poliActivos).length === 0){
@@ -693,7 +1060,7 @@ function calcularTiles(){
   const s = document.getElementById("f-zoom");
   if(!s) return;
   const zMax = parseInt(s.value, 10);
-  // v25c: solo tiles de la finca activa
+  // v25d: solo tiles de la finca activa
   const tiles = tilesParaPoligonos(poligonosDeFincaActiva(), 15, zMax);
   const mbAprox = (tiles.length * 40 / 1024).toFixed(1);
   const p = document.getElementById("prev-tiles");
@@ -705,7 +1072,7 @@ function calcularTiles(){
 async function lanzarPrecarga(){
   if(PRECARGA.activa) return;
   const zoomMax = parseInt(document.getElementById("f-zoom").value, 10);
-  // v25c: solo tiles de la finca activa (no descarga zonas intermedias)
+  // v25d: solo tiles de la finca activa (no descarga zonas intermedias)
   const tiles = tilesParaPoligonos(poligonosDeFincaActiva(), 15, zoomMax);
   if(!tiles.length){ aviso("No hay tiles que descargar"); return; }
 
@@ -795,7 +1162,7 @@ let S = {
   parcelaDetectada:null, muestreoActivo:null, razonSel:null, gpsWatchId:null
 };
 let POLIGONOS = {};
-// v25c: metadata por parcela (finca_id, etc.). Clave: mismo código que POLIGONOS.
+// v25d: metadata por parcela (finca_id, etc.). Clave: mismo código que POLIGONOS.
 // Formato: { "ALIA1": { finca_id: 1 }, "TEJ3": { finca_id: 11 }, ... }
 let POLIGONOS_META = {};
 let MAPA = {mini:null, grande:null, capaPoli:null, capaGPS:null, puntos:null,
@@ -804,8 +1171,11 @@ let deshacerTimer = null;
 
 // ============ INIT ============
 function init(){
+  // Comprobar si estamos autenticados antes de arrancar
+  if(!verificarSesionOAnular()) return;
+
   document.getElementById("fecha").textContent = new Date().toLocaleDateString("es-ES",{weekday:"long",day:"2-digit",month:"long"});
-  cargarCatalogoDesdeStorage();  // hidrata CATALOGO desde localStorage (o vacío)
+  cargarCatalogoDesdeStorage(); 
   limpiarMuestreosHuerfanos();
   purgarMuestreosAntiguos();
   cargarPoligonos();
@@ -834,7 +1204,7 @@ function cargarPoligonos(){
   }catch(e){ POLIGONOS_META = {}; }
 }
 
-// v25c: devuelve solo los polígonos que pertenecen a la finca activa.
+// v25d: devuelve solo los polígonos que pertenecen a la finca activa.
 // Formato de retorno: mismo que POLIGONOS ({ "ALIA1": [[lon,lat],...] }) para
 // compatibilidad con el resto del código que ya trabaja con ese formato.
 // Si no hay finca activa o los polígonos no tienen metadata, devuelve TODOS
@@ -859,7 +1229,7 @@ function poligonosDeFincaActiva(){
   return filtrados;
 }
 
-// v25c: cuenta parcelas de la finca activa (para info UI)
+// v25d: cuenta parcelas de la finca activa (para info UI)
 function nPoligonosFincaActiva(){
   return Object.keys(poligonosDeFincaActiva()).length;
 }
@@ -876,7 +1246,7 @@ function renderSelectParcela(){
   const s = document.getElementById("sel");
   const val = s.value;
   s.innerHTML = '<option value="">- Elige parcela -</option>';
-  // v25c: solo parcelas de la finca activa (fix bug de coherencia)
+  // v25d: solo parcelas de la finca activa (fix bug de coherencia)
   const poliActivos = poligonosDeFincaActiva();
   const codigos = Object.keys(poliActivos).sort();
   if(codigos.length === 0){
@@ -958,6 +1328,8 @@ async function cambParc(){
   actualizarPie();
   iniciarSacudida();
   chequearParcelaGPS();
+  S.valSac = null;
+  actualizarFranjaPosicion();
 }
 
 // ============ MUESTREOS ============
@@ -1195,6 +1567,20 @@ async function sincronizarMuestreo(m){
   const fA = fincaActiva();
   if(!fA) throw new Error("Sin finca activa");
 
+  // v26a: validar ANTES de escribir nada en el servidor que todas las
+  // observaciones tienen registro conocido (evita muestreos a medias en BD)
+  const faltanReg = [];
+  sacudidasDeMuestreo(m.id).forEach(s => {
+    Object.entries(s.obs || {}).forEach(([k, v]) => {
+      if(!(v > 0)) return;
+      const o = parseClaveObs(k);
+      if(!getPlagaId(o.cod) || !getRegistroId(o.cod, o.organo, o.tipo)) faltanReg.push(k);
+    });
+  });
+  if(faltanReg.length){
+    throw new Error("Catálogo desactualizado en este dispositivo (" + etiquetaObs(faltanReg[0]) + "). Ve a Admin → Actualizar catálogos y reintenta.");
+  }
+
   // 1. Crear el muestreo en Supabase
   const plagueroLS = localStorage.getItem(K_PLAGUERO) || "";
   const filaMuestreo = {
@@ -1231,25 +1617,26 @@ async function sincronizarMuestreo(m){
     supabaseSacIds = resSacs.map(s => ({numero: s.numero, id: s.id}));
   }
 
-  // 3. Crear capturas — una fila por cada plaga+subtipo con cantidad>0
+  // 3. Crear capturas — v26a: cada fila lleva su registro (órgano · tipo)
   const filasCap = [];
   sacs.forEach(s => {
     const supSac = supabaseSacIds.find(x => x.numero === s.numero);
     if(!supSac) return;
-    if(!s.plagas) return;
-    Object.entries(s.plagas).forEach(([cod, v]) => {
+    // 3a. Individuos en sacudida (estructura histórica)
+    Object.entries(s.plagas || {}).forEach(([cod, v]) => {
       if(v == null) return;
-      const plagaDef = CATALOGO.find(x => x.cod === cod);
       const plagaId = getPlagaId(cod);
       if(!plagaId) return; // catálogo desactualizado
+      // null en plagas sin registro de sacudida (legado): la BD lo deja como "sin desglose"
+      const regId = getRegistroId(cod, "SACUDIDA", "individuos");
       if(typeof v === "object"){
         Object.entries(v).forEach(([subCod, subN]) => {
           if(subN > 0){
-            const subId = getSubtipoId(cod, subCod);
             filasCap.push({
               sacudida_id: supSac.id,
               plaga_id: plagaId,
-              subtipo_id: subId,
+              subtipo_id: getSubtipoId(cod, subCod),
+              registro_id: regId,
               cantidad: subN
             });
           }
@@ -1259,9 +1646,22 @@ async function sincronizarMuestreo(m){
           sacudida_id: supSac.id,
           plaga_id: plagaId,
           subtipo_id: null,
+          registro_id: regId,
           cantidad: v
         });
       }
+    });
+    // 3b. Observaciones (presencia / daño / otros órganos)
+    Object.entries(s.obs || {}).forEach(([k, v]) => {
+      if(!(v > 0)) return;
+      const o = parseClaveObs(k);
+      filasCap.push({
+        sacudida_id: supSac.id,
+        plaga_id: getPlagaId(o.cod),
+        subtipo_id: o.subCod ? getSubtipoId(o.cod, o.subCod) : null,
+        registro_id: getRegistroId(o.cod, o.organo, o.tipo),
+        cantidad: v
+      });
     });
   });
 
@@ -1480,11 +1880,11 @@ function totalCapturasEn(sac){
   return Object.keys(sac.plagas).reduce((total, cod) => total + cantSacudida(sac, cod), 0);
 }
 
-// sacudida tiene capturas
+// sacudida tiene capturas (v26a: por incidencia; los auxiliares no cuentan)
 function tieneCapturas(sac){
   if(!sac) return false;
   if(sac.sin_capturas) return false;
-  return totalCapturasEn(sac) > 0;
+  return incidenciaEn(sac) > 0;
 }
 
 // cantidad de un subtipo específico de una plaga
@@ -1498,8 +1898,11 @@ function cantSubtipo(sac, cod, subCod){
 // ============ SACUDIDA EN CURSO ============
 function iniciarSacudida(){
   S.sacActual = {};
+  S.obsActual = {};
   CATALOGO.forEach(p => {
-    if(p.subs){
+    const rs = regSacudida(p);
+    if(!rs) return; // plaga sin conteo en sacudida (enfermedades, presencias)
+    if(p.subs && rs.por_sub){
       // Plaga con subtipos: {SUB1:0, SUB2:0, ...}
       const obj = {};
       p.subs.forEach(s => obj[s.cod] = 0);
@@ -1515,7 +1918,7 @@ function iniciarSacudida(){
   renderPlagas();
 }
 
-// Helper: obtiene total de una plaga (suma subtipos si los tiene)
+// Helper: obtiene total de individuos de una plaga (suma subtipos si los tiene)
 function totalPlaga(cod){
   const v = S.sacActual ? S.sacActual[cod] : null;
   if(v == null) return 0;
@@ -1525,9 +1928,11 @@ function totalPlaga(cod){
   return v || 0;
 }
 
-// Helper: total de todas las capturas de la sacudida actual
+// Helper: total de marcas de la sacudida actual (individuos + observaciones, incluidos auxiliares)
 function totalCapturasSacudida(){
-  return CATALOGO.reduce((total, p) => total + totalPlaga(p.cod), 0);
+  const ind = CATALOGO.reduce((total, p) => total + totalPlaga(p.cod), 0);
+  const obs = Object.values(S.obsActual || {}).filter(v => v > 0).length;
+  return ind + obs;
 }
 
 function renderPlagas(){
@@ -1544,20 +1949,31 @@ function renderPlagas(){
     return;
   }
   CATALOGO.forEach(p => {
-    const div = document.createElement("div");
+    if(regsSacudir(p).length === 0) return; // v26b: especie solo de trampa
+    const rs = regSacudida(p);
+    const directo = esDirecto(p);
     const n = totalPlaga(p.cod);
-    div.className = "plaga" + (n>0 ? " tocado" : "");
-    const btnQuitar = n>0 ? '<button class="quitar">−</button>' : "";
-    div.innerHTML = btnQuitar + '<div class="n">'+p.n+'</div><div class="c">'+n+'</div>';
+    const marcadas = obsMarcadasDe(p.cod);
+    const tocado = n > 0 || marcadas.length > 0;
+    const div = document.createElement("div");
+    div.className = "plaga" + (tocado ? " tocado" : "");
+    const btnQuitar = tocado ? '<button class="quitar">−</button>' : "";
+    // Número grande: individuos si la plaga se cuenta en sacudida; si no, ✓ cuando hay algo marcado
+    const cnt = rs ? String(n) : (marcadas.length ? "✓" : "·");
+    let lineaObs = "";
+    if(marcadas.length){
+      const orgs = [...new Set(marcadas.map(k => ORGANO_LBL[parseClaveObs(k).organo] || ""))];
+      lineaObs = '<div style="font-size:10px;color:#7a5230;margin-top:2px;line-height:1.2">' + orgs.join(" · ") + '</div>';
+    }
+    div.innerHTML = btnQuitar + '<div class="n">'+p.n+'</div><div class="c">'+cnt+'</div>' + lineaObs;
     div.onclick = () => {
       if(!S.parcela){ aviso("Elige parcela primero"); return; }
-      if(p.subs){
-        // Con subtipos → abrir modal
-        abrirModalSubtipos(p);
-      } else {
-        // Sin subtipos → suma 1 directo
+      if(directo){
+        // Solo individuos en sacudida → suma 1 directo
         S.sacActual[p.cod] = (S.sacActual[p.cod]||0) + 1;
         renderPlagas();
+      } else {
+        abrirModalRegistros(p);
       }
     };
     c.appendChild(div);
@@ -1565,79 +1981,149 @@ function renderPlagas(){
     if(bq){
       bq.onclick = (ev) => {
         ev.stopPropagation();
-        if(p.subs){
-          // Con subtipos: abrir modal (para ajustar exactamente)
-          abrirModalSubtipos(p);
-        } else if(S.sacActual[p.cod] > 0){
-          S.sacActual[p.cod]--;
-          renderPlagas();
+        if(directo){
+          if(S.sacActual[p.cod] > 0){
+            S.sacActual[p.cod]--;
+            renderPlagas();
+          }
+        } else {
+          abrirModalRegistros(p);
         }
       };
     }
   });
 }
 
-// ============ MODAL DE SUBTIPOS ============
-function abrirModalSubtipos(plaga){
-  const cur = S.sacActual[plaga.cod] || {};
-  // Copia editable
-  const temp = {};
-  plaga.subs.forEach(s => temp[s.cod] = cur[s.cod] || 0);
+// ============ v26a: MODAL DE REGISTROS (sustituye al modal de subtipos) ============
+// Muestra solo lo permitido en catalogo_registros para esta plaga:
+//   contadores para individuos, interruptor Sí/No para presencia y daño.
+function abrirModalRegistros(plaga){
+  const rs = regSacudida(plaga);
+  const ob = regsObs(plaga);
+  const subsS = (rs && plaga.subs && rs.por_sub) ? plaga.subs : null;
+  const obsAct = S.obsActual || {};
+  const ctrls = []; // {grupo, key, kind:"cnt"|"tog", label, v}
+
+  if(rs){
+    const grupo = "Sacudida · nº individuos";
+    const cur = S.sacActual[plaga.cod];
+    if(subsS){
+      subsS.forEach(s => ctrls.push({grupo, key:"S|"+s.cod, kind:"cnt", label:s.n,
+        v: (cur && typeof cur === "object") ? (cur[s.cod] || 0) : 0}));
+    } else {
+      const tot = (cur && typeof cur === "object") ? Object.values(cur).reduce((a,b) => a+(b||0), 0) : (cur || 0);
+      ctrls.push({grupo, key:"S|", kind:"cnt", label:"Individuos", v: tot});
+    }
+  }
+  ob.forEach(r => {
+    const grupo = (ORGANO_LBL[r.organo] || r.organo) + " · " + (TIPO_LBL[r.tipo] || r.tipo);
+    const kind = r.tipo === "individuos" ? "cnt" : "tog";
+    if(r.por_sub && plaga.subs){
+      plaga.subs.forEach(s => {
+        const k = claveObs(plaga.cod, r.organo, r.tipo, s.cod);
+        ctrls.push({grupo, key:k, kind, label:s.n, v: obsAct[k] || 0});
+      });
+    } else {
+      const k = claveObs(plaga.cod, r.organo, r.tipo, "");
+      const label = kind === "cnt" ? "Individuos" : (r.tipo === "dano" ? "Hay daño" : "Presente");
+      ctrls.push({grupo, key:k, kind, label, v: obsAct[k] || 0});
+    }
+  });
+
+  if(!ctrls.length){
+    aviso("Esta plaga no tiene registros configurados. Actualiza catálogos.");
+    return;
+  }
+
+  const BASE_TOG = "min-width:88px;height:38px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;";
+  const estiloTog = on => BASE_TOG + (on
+    ? "border:1px solid #0b6e4f;background:#0b6e4f;color:#fff"
+    : "border:1px solid #d5dad8;background:#fff;color:#5b6467");
 
   let html = '<h3 style="margin:0 0 8px;color:#0b6e4f">'+plaga.n+'</h3>';
-  html += '<div style="font-size:12px;color:#5b6467;margin-bottom:14px">Ajusta las cantidades. Pueden convivir varios tipos en la misma sacudida.</div>';
-
-  plaga.subs.forEach(s => {
-    html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 6px;border-bottom:1px solid #f0f0ee">'+
-      '<div style="font-size:15px;font-weight:600;color:#14181a">'+s.n+'</div>'+
-      '<div style="display:flex;align-items:center;gap:10px">'+
-        '<button class="sub-menos" data-cod="'+s.cod+'" style="width:38px;height:38px;border-radius:8px;border:1px solid #d5dad8;background:#fff;font-size:20px;font-weight:700;cursor:pointer">−</button>'+
-        '<div id="sub-n-'+s.cod+'" style="min-width:36px;text-align:center;font-size:22px;font-weight:600;color:#0b6e4f">'+temp[s.cod]+'</div>'+
-        '<button class="sub-mas" data-cod="'+s.cod+'" style="width:38px;height:38px;border-radius:8px;border:1px solid #0b6e4f;background:#0b6e4f;color:#fff;font-size:20px;font-weight:700;cursor:pointer">+</button>'+
-      '</div>'+
-    '</div>';
+  html += '<div style="font-size:12px;color:#5b6467;margin-bottom:6px">Marca lo observado en este árbol.</div>';
+  let grupoAct = null;
+  ctrls.forEach((c, i) => {
+    if(c.grupo !== grupoAct){
+      grupoAct = c.grupo;
+      html += '<div style="font-size:11px;font-weight:700;color:#7a5230;text-transform:uppercase;letter-spacing:0.4px;margin:14px 0 2px">'+c.grupo+'</div>';
+    }
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 6px;border-bottom:1px solid #f0f0ee">'+
+      '<div style="font-size:15px;font-weight:600;color:#14181a">'+c.label+'</div>';
+    if(c.kind === "cnt"){
+      html += '<div style="display:flex;align-items:center;gap:10px">'+
+        '<button id="mr-menos-'+i+'" style="width:38px;height:38px;border-radius:8px;border:1px solid #d5dad8;background:#fff;font-size:20px;font-weight:700;cursor:pointer">−</button>'+
+        '<div id="mr-n-'+i+'" style="min-width:36px;text-align:center;font-size:22px;font-weight:600;color:#0b6e4f">'+c.v+'</div>'+
+        '<button id="mr-mas-'+i+'" style="width:38px;height:38px;border-radius:8px;border:1px solid #0b6e4f;background:#0b6e4f;color:#fff;font-size:20px;font-weight:700;cursor:pointer">+</button>'+
+      '</div>';
+    } else {
+      html += '<button id="mr-tog-'+i+'" style="'+estiloTog(c.v > 0)+'">'+(c.v > 0 ? "Sí" : "No")+'</button>';
+    }
+    html += '</div>';
   });
 
   html += '<div style="margin-top:16px;display:flex;gap:8px">'+
     '<button class="btn btn-s" style="flex:1" onclick="cerrar()">Cancelar</button>'+
-    '<button class="btn btn-s" style="flex:0.6;font-size:12px" id="sub-reset">Poner a 0</button>'+
-    '<button class="btn btn-guardar" style="flex:1.4" id="sub-guardar">Guardar</button>'+
+    '<button class="btn btn-s" style="flex:0.6;font-size:12px" id="mr-reset">Poner a 0</button>'+
+    '<button class="btn btn-guardar" style="flex:1.4" id="mr-guardar">Guardar</button>'+
   '</div>';
 
   document.getElementById("hoja").innerHTML = html;
   document.getElementById("velo").classList.add("on");
 
-  // Wiring de +/-
-  document.querySelectorAll('.sub-mas').forEach(b => {
-    b.onclick = () => {
-      const cod = b.dataset.cod;
-      temp[cod] = (temp[cod]||0) + 1;
-      document.getElementById("sub-n-"+cod).textContent = temp[cod];
-    };
+  function pintarCtrl(i){
+    const c = ctrls[i];
+    if(c.kind === "cnt"){
+      document.getElementById("mr-n-"+i).textContent = c.v;
+    } else {
+      const b = document.getElementById("mr-tog-"+i);
+      b.style.cssText = estiloTog(c.v > 0);
+      b.textContent = c.v > 0 ? "Sí" : "No";
+    }
+  }
+  ctrls.forEach((c, i) => {
+    if(c.kind === "cnt"){
+      document.getElementById("mr-mas-"+i).onclick = () => { c.v = (c.v||0) + 1; pintarCtrl(i); };
+      document.getElementById("mr-menos-"+i).onclick = () => { if(c.v > 0){ c.v--; pintarCtrl(i); } };
+    } else {
+      document.getElementById("mr-tog-"+i).onclick = () => { c.v = c.v > 0 ? 0 : 1; pintarCtrl(i); };
+    }
   });
-  document.querySelectorAll('.sub-menos').forEach(b => {
-    b.onclick = () => {
-      const cod = b.dataset.cod;
-      if(temp[cod] > 0){
-        temp[cod]--;
-        document.getElementById("sub-n-"+cod).textContent = temp[cod];
-      }
-    };
-  });
-  document.getElementById("sub-reset").onclick = () => {
-    plaga.subs.forEach(s => {
-      temp[s.cod] = 0;
-      document.getElementById("sub-n-"+s.cod).textContent = "0";
-    });
+  document.getElementById("mr-reset").onclick = () => {
+    ctrls.forEach((c, i) => { c.v = 0; pintarCtrl(i); });
   };
-  document.getElementById("sub-guardar").onclick = () => {
-    S.sacActual[plaga.cod] = {...temp};
+  document.getElementById("mr-guardar").onclick = () => {
+    if(rs){
+      if(subsS){
+        const obj = {};
+        subsS.forEach(s => obj[s.cod] = 0);
+        ctrls.filter(c => c.key.startsWith("S|")).forEach(c => { obj[c.key.slice(2)] = c.v; });
+        S.sacActual[plaga.cod] = obj;
+      } else {
+        const c0 = ctrls.find(c => c.key === "S|");
+        S.sacActual[plaga.cod] = c0 ? c0.v : 0;
+      }
+    }
+    S.obsActual = S.obsActual || {};
+    ctrls.filter(c => !c.key.startsWith("S|")).forEach(c => {
+      if(c.v > 0) S.obsActual[c.key] = c.v;
+      else delete S.obsActual[c.key];
+    });
     cerrar();
     renderPlagas();
   };
 }
 
-function guardarSac(sinCapturas){
+// v26c: valida la posición con el polígono antes de guardar
+async function guardarSac(sinCapturas){
+  if(!S.parcela){ aviso("Elige parcela"); return; }
+  // Si no hay nada marcado, el aviso habitual va primero (no preguntar por la posición)
+  if(!sinCapturas && totalCapturasSacudida() === 0){ guardarSacValidada(sinCapturas); return; }
+  if(!(await validarPosicionSacudida())) return;
+  guardarSacValidada(sinCapturas);
+}
+
+function guardarSacValidada(sinCapturas){
   if(!S.parcela){ aviso("Elige parcela"); return; }
 
   // VALIDAR ANTES de crear muestreo (fix bug muestreo fantasma)
@@ -1680,7 +2166,9 @@ function guardarSacAhora(sinCapturas){
     parcela: S.parcela,
     numero: numero,
     plagas: sinCapturas ? {} : JSON.parse(JSON.stringify(S.sacActual)),
-    sin_capturas: sinCapturas || totalCapturas === 0,
+    obs: sinCapturas ? {} : JSON.parse(JSON.stringify(S.obsActual || {})),
+    // v26a: "sin capturas" = sin incidencia (los auxiliares no cuentan)
+    sin_capturas: sinCapturas || incidenciaEn({plagas: S.sacActual, obs: S.obsActual}) === 0,
     nota: nota,
     lat: S.gps ? S.gps.lat : "",
     lon: S.gps ? S.gps.lon : "",
@@ -1848,6 +2336,8 @@ function pedirGPS(){
       pintarMini();
       pintarMapaGrande();
       chequearParcelaGPS();
+      actualizarFranjaPosicion();
+      actualizarGPSTrampas();
     },
     err => {
       const c = document.getElementById("chip-gps");
@@ -1877,7 +2367,7 @@ function puntoEnPoligono(lon, lat, poly){
 function chequearParcelaGPS(){
   if(!S.gps) return;
   let encontrada = null;
-  // v25c: buscar SOLO en parcelas de la finca activa
+  // v25d: buscar SOLO en parcelas de la finca activa
   // (evita detectar parcelas de otras fincas que estén cargadas)
   const poliActivos = poligonosDeFincaActiva();
   Object.entries(poliActivos).forEach(([cod, poly]) => {
@@ -1887,7 +2377,29 @@ function chequearParcelaGPS(){
   const banner = document.getElementById("parcela-detect");
   const txt = document.getElementById("parcela-detect-txt");
   if(encontrada && encontrada !== S.parcela){
-    txt.textContent = "El GPS te sitúa en " + encontrada;
+    // v25d: si la detectada pertenece a un grupo de sub-parcelas con misma geometría,
+    // avisar del prefijo común para no imponer una sub-parcela concreta al azar.
+    let mensaje = encontrada;
+    const poliActivos = poligonosDeFincaActiva();
+    const polyEncontrada = poliActivos[encontrada];
+    if(polyEncontrada){
+      const keyEnc = JSON.stringify(polyEncontrada.map(p => [Math.round(p[0]*1e7)/1e7, Math.round(p[1]*1e7)/1e7]));
+      const grupo = [];
+      Object.entries(poliActivos).forEach(([c, poly]) => {
+        const key = JSON.stringify(poly.map(p => [Math.round(p[0]*1e7)/1e7, Math.round(p[1]*1e7)/1e7]));
+        if(key === keyEnc) grupo.push(c);
+      });
+      if(grupo.length > 1){
+        grupo.sort();
+        const raices = grupo.map(c => c.replace(/[A-Z]$/, ""));
+        const primeraRaiz = raices[0];
+        const todasIguales = raices.every(r => r === primeraRaiz);
+        if(todasIguales){
+          mensaje = primeraRaiz + " (elige: " + grupo.join(", ") + ")";
+        }
+      }
+    }
+    txt.textContent = "El GPS te sitúa en " + mensaje;
     banner.classList.add("on");
   } else {
     banner.classList.remove("on");
@@ -1916,7 +2428,19 @@ const PALETA_PARCELAS = [
 ];
 function colorParcela(cod){
   const codigos = Object.keys(POLIGONOS).sort();
-  const idx = codigos.indexOf(cod);
+  let idx = codigos.indexOf(cod);
+  // v25d: si el código no existe tal cual (ej. "COI22" cuando la BD tiene
+  // COI22A/B/C agrupados en el mapa), buscar la primera sub-parcela que
+  // empiece por ese prefijo para reutilizar su color.
+  // Así la parcela agrupada tiene el mismo color que sus sub-parcelas.
+  if(idx < 0){
+    for(let i = 0; i < codigos.length; i++){
+      if(codigos[i].startsWith(cod) && /^[A-Z]$/.test(codigos[i].charAt(cod.length))){
+        idx = i;
+        break;
+      }
+    }
+  }
   if(idx < 0) return PALETA_PARCELAS[0];
   return PALETA_PARCELAS[idx % PALETA_PARCELAS.length];
 }
@@ -1988,7 +2512,7 @@ function pintarMapaGrande(){
     MAPA.gCapaTiles = crearCapaTiles();
     MAPA.gCapaTiles.addTo(MAPA.grande);
   }
-  // v25c: detectar cambio de finca activa → forzar reencuadre
+  // v25d: detectar cambio de finca activa → forzar reencuadre
   const fA = fincaActiva();
   const fincaActualId = fA ? fA.id : null;
   const cambioFinca = MAPA.ultimaFincaId !== fincaActualId;
@@ -1998,7 +2522,7 @@ function pintarMapaGrande(){
   if(MAPA.gCapaPuntos){ try{ map.removeLayer(MAPA.gCapaPuntos); }catch(e){} }
   if(MAPA.gCapaGPS){ try{ map.removeLayer(MAPA.gCapaGPS); }catch(e){} }
 
-  // v25c: solo mostrar en el mapa los polígonos de la finca activa
+  // v25d: solo mostrar en el mapa los polígonos de la finca activa
   const poliActivos = poligonosDeFincaActiva();
   const parcelas = Object.keys(poliActivos);
   if(parcelas.length === 0){
@@ -2013,30 +2537,86 @@ function pintarMapaGrande(){
 
   MAPA.gCapaParcelas = L.layerGroup();
   const bounds = [];
+
+  // v25d: agrupar polígonos idénticos (sub-parcelas administrativas
+  // que comparten geometría) para mostrar UNA etiqueta con el prefijo común.
+  // Ejemplo: COI27A + COI27B + COI27C → una parcela "COI27" en el mapa,
+  // aunque en Hispatec y en el selector siguen existiendo por separado.
+  const grupos = {};  // { geomKey: {codigos:[], poly:[]} }
   Object.entries(poliActivos).forEach(([cod, poly]) => {
-    const latlngs = poly.map(p => [p[1], p[0]]);
-    const m = muestreoActivoDe(cod);
+    // Clave estable de geometría (redondeada a 7 decimales para robustez)
+    const key = JSON.stringify(poly.map(p => [Math.round(p[0]*1e7)/1e7, Math.round(p[1]*1e7)/1e7]));
+    if(!grupos[key]){
+      grupos[key] = {codigos:[], poly:poly};
+    }
+    grupos[key].codigos.push(cod);
+  });
+
+  // Helper: extraer prefijo común de una lista de códigos.
+  // Solo agrupa si TODOS los códigos difieren únicamente en la última letra
+  // (A/B/C/D). Si no comparten prefijo obvio, deja el primero como etiqueta.
+  function prefijoComun(codigos){
+    if(codigos.length === 1) return codigos[0];
+    // Quitar última letra de cada uno si es A-Z
+    const raices = codigos.map(c => c.replace(/[A-Z]$/, ""));
+    const primeraRaiz = raices[0];
+    const todasIguales = raices.every(r => r === primeraRaiz);
+    if(todasIguales && primeraRaiz.length > 0) return primeraRaiz;
+    // Fallback: no hay prefijo claro, mostrar todos separados por /
+    return codigos.join("/");
+  }
+
+  Object.values(grupos).forEach(({codigos, poly}) => {
+    codigos.sort();
+    const codMostrar = prefijoComun(codigos);
+    // Muestreo activo: si hay alguno en cualquiera de las sub-parcelas del grupo,
+    // marcar como "en actividad".
+    let m = null;
+    for(const c of codigos){
+      const mc = muestreoActivoDe(c);
+      if(mc){ m = mc; break; }
+    }
     const finalizado = m && m.status === "finalizado";
-    const col = colorParcela(cod);
+    // Color basado en el código a mostrar (padre) para consistencia visual
+    const col = colorParcela(codMostrar);
+    const latlngs = poly.map(p => [p[1], p[0]]);
     const p = L.polygon(latlngs, {
       color: col.borde, weight:3,
       fillColor: finalizado ? "#7a5230" : col.relleno,
       fillOpacity: finalizado ? 0.30 : 0.18
     });
-    p.bindTooltip(cod + (m ? " · " + m.sacudidas_count + " sacudidas" : ""), {permanent:false, direction:"top"});
+    // Tooltip: si es grupo, lista las sub-parcelas. Si es una sola, mantiene formato original.
+    let tooltipTxt = codMostrar;
+    if(codigos.length > 1){
+      // Extraer solo las letras finales para no repetir el prefijo: A, B, C
+      const sufijos = codigos.map(c => c.replace(codMostrar, "")).filter(s => s);
+      if(sufijos.length === codigos.length){
+        tooltipTxt = codMostrar + " (" + sufijos.join(", ") + ")";
+      }
+    }
+    if(m) tooltipTxt += " · " + m.sacudidas_count + " sacudidas";
+    p.bindTooltip(tooltipTxt, {permanent:false, direction:"top"});
     p.on("click", () => {
-      document.getElementById("sel").value = cod;
-      cambParc();
-      ir("sac");
+      // Al clicar: si es grupo, no autoseleccionar (que el usuario elija en el desplegable).
+      // Si es una sola parcela, comportamiento clásico.
+      if(codigos.length === 1){
+        document.getElementById("sel").value = codigos[0];
+        cambParc();
+        ir("sac");
+      } else {
+        // Grupo: ir al selector con la primera pre-marcada como referencia
+        ir("sac");
+        aviso("Elige la sub-parcela: " + codigos.join(", "));
+      }
     });
     p.addTo(MAPA.gCapaParcelas);
 
-    // Etiqueta con el código sobre el polígono
+    // Etiqueta con el prefijo (o código único si no es grupo)
     const centro = centroPoligono(poly);
     L.marker(centro, {
       icon: L.divIcon({
         className: "etiq-parc",
-        html: '<div style="background:rgba(255,255,255,0.9);color:#14181a;padding:3px 9px;border-radius:6px;font-weight:700;font-size:13px;border:1.5px solid ' + col.borde + ';white-space:nowrap;text-align:center">' + cod + '</div>',
+        html: '<div style="background:rgba(255,255,255,0.9);color:#14181a;padding:3px 9px;border-radius:6px;font-weight:700;font-size:13px;border:1.5px solid ' + col.borde + ';white-space:nowrap;text-align:center">' + codMostrar + '</div>',
         iconSize: [60, 22],
         iconAnchor: [30, 11]
       })
@@ -2067,13 +2647,25 @@ function pintarMapaGrande(){
       }
     });
   });
+  // v26b: trampas activas de la finca
+  trampasActivasFinca().forEach(t => {
+    if(t.lat == null || t.lon == null) return;
+    const pDef = CATALOGO.find(x => x.cod === t.plaga_cod);
+    L.marker([t.lat, t.lon], {
+      icon: L.divIcon({
+        className: "",
+        html: '<div style="width:14px;height:14px;background:#b8771a;border:2px solid #fff;border-radius:3px;box-shadow:0 1px 3px rgba(0,0,0,0.4)"></div>',
+        iconSize: [14, 14], iconAnchor: [7, 7]
+      })
+    }).bindTooltip((pDef ? pDef.n : t.plaga_cod) + " · " + etiquetaTrampa(t), {direction:"top"}).addTo(MAPA.gCapaPuntos);
+  });
   MAPA.gCapaPuntos.addTo(map);
 
   if(S.gps){
     MAPA.gCapaGPS = L.circleMarker([S.gps.lat, S.gps.lon], {radius:8, color:"#fff", weight:2.5, fillColor:"#1b5e9e", fillOpacity:1}).addTo(map);
   }
 
-  // v25c: reencuadrar cuando es primera vez O cuando cambia la finca activa
+  // v25d: reencuadrar cuando es primera vez O cuando cambia la finca activa
   if(bounds.length && (esPrimeraVez || cambioFinca)){
     let all = bounds[0];
     for(let i=1; i<bounds.length; i++) all = all.extend(bounds[i]);
@@ -2091,7 +2683,7 @@ function pintarMapaGrande(){
 // reencuadrar mapa manualmente (para volver a la vista inicial cuando el usuario se ha "perdido" haciendo zoom)
 function reencuadrarMapa(){
   if(!MAPA.grande) return;
-  // v25c: reencuadrar solo sobre la finca activa (evita zoom out excesivo con multi-finca)
+  // v25d: reencuadrar solo sobre la finca activa (evita zoom out excesivo con multi-finca)
   const poliActivos = poligonosDeFincaActiva();
   const parcelas = Object.keys(poliActivos);
   if(parcelas.length === 0) return;
@@ -2108,6 +2700,819 @@ function reencuadrarMapa(){
 }
 
 // ============ NAVEGACIÓN ============
+// ============================================================================
+// v26c: VALIDACIÓN DE POSICIÓN (sacudidas y trampas)
+// ----------------------------------------------------------------------------
+// Casos según dónde sitúa el GPS al plaguero respecto a la parcela elegida:
+//   dentro  -> sin aviso
+//   margen  -> fuera pero a menos del margen (camino, árbol de borde): aviso discreto
+//   lejos   -> fuera, más allá del margen, sin estar en otra parcela: pide confirmación
+//   otra    -> dentro de OTRA parcela y más allá del margen: no deja registrar, ofrece cambiar
+//   sin_gps -> sin GPS o precisión peor que 50 m: no se puede comprobar
+//   sin_poligono -> la parcela no tiene polígono: no se puede comprobar
+// Margen = máx(15 m, precisión del GPS), con tope de 30 m.
+// ============================================================================
+const MARGEN_MIN_M = 15, MARGEN_MAX_M = 30, PRECISION_MAX_M = 50, DIST_AVISO_TRAMPA_M = 25;
+
+function distanciaM(lat1, lon1, lat2, lon2){
+  const R = 6371000, rad = x => x * Math.PI / 180;
+  const dLat = rad(lat2 - lat1), dLon = rad(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLon/2)**2;
+  return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+// Distancia (m) de un punto al borde de un polígono [[lon,lat],...]
+function distanciaAPoligonoM(lon, lat, poly){
+  const kx = 111320 * Math.cos(lat * Math.PI / 180), ky = 110540;
+  let min = Infinity;
+  for(let i = 0, j = poly.length - 1; i < poly.length; j = i++){
+    const ax = (poly[j][0] - lon) * kx, ay = (poly[j][1] - lat) * ky;
+    const bx = (poly[i][0] - lon) * kx, by = (poly[i][1] - lat) * ky;
+    const dx = bx - ax, dy = by - ay;
+    const len2 = dx*dx + dy*dy;
+    let t = len2 > 0 ? -(ax*dx + ay*dy) / len2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    const px = ax + t*dx, py = ay + t*dy;
+    min = Math.min(min, Math.sqrt(px*px + py*py));
+  }
+  return min;
+}
+function evaluarPosicion(parcela){
+  if(!S.gps || S.gps.lat == null || S.gps.prec > PRECISION_MAX_M) return {estado: "sin_gps"};
+  const polis = poligonosDeFincaActiva();
+  const poly = polis[parcela];
+  if(!poly) return {estado: "sin_poligono"};
+  if(puntoEnPoligono(S.gps.lon, S.gps.lat, poly)) return {estado: "dentro", dist: 0};
+  const dist = Math.round(distanciaAPoligonoM(S.gps.lon, S.gps.lat, poly));
+  const margen = Math.min(MARGEN_MAX_M, Math.max(MARGEN_MIN_M, S.gps.prec || 0));
+  if(dist <= margen) return {estado: "margen", dist, margen};
+  let otra = null;
+  Object.entries(polis).forEach(([cod, p]) => {
+    if(!otra && cod !== parcela && puntoEnPoligono(S.gps.lon, S.gps.lat, p)) otra = cod;
+  });
+  return {estado: otra ? "otra" : "lejos", dist, margen, otra};
+}
+
+// ---------- Sacudidas: franja de posición + validación al guardar ----------
+function actualizarFranjaPosicion(){
+  const el = document.getElementById("franja-pos");
+  if(!el) return;
+  if(!S.parcela){ el.style.display = "none"; return; }
+  const ev = evaluarPosicion(S.parcela);
+  let txt = "", fondo = "", color = "";
+  if(ev.estado === "margen"){ txt = "En el borde de " + S.parcela + " (a " + ev.dist + " m)"; fondo = "#fff5e0"; color = "#8a5a00"; }
+  else if(ev.estado === "lejos"){ txt = "Fuera de " + S.parcela + " · a " + ev.dist + " m"; fondo = "#fdecea"; color = "#c33"; }
+  else if(ev.estado === "otra"){ txt = "Estás en " + ev.otra + ", no en " + S.parcela; fondo = "#fdecea"; color = "#c33"; }
+  else if(ev.estado === "sin_gps"){ txt = "Sin GPS fiable · no se comprueba la parcela"; fondo = "#eef0ef"; color = "#5b6467"; }
+  if(!txt){ el.style.display = "none"; return; }
+  el.textContent = txt;
+  el.style.cssText = "display:block;margin-top:8px;padding:8px 10px;border-radius:8px;font-size:12px;font-weight:600;background:" + fondo + ";color:" + color;
+}
+
+// Devuelve true si se puede guardar la sacudida. Solo interrumpe cuando cambia la situación.
+async function validarPosicionSacudida(){
+  const ev = evaluarPosicion(S.parcela);
+  const clave = S.parcela + "|" + (S.muestreoActivo ? S.muestreoActivo.id : "nuevo");
+  if(!S.valSac || S.valSac.clave !== clave) S.valSac = {clave, confirmadoLejos: false};
+  if(ev.estado === "dentro" || ev.estado === "margen"){
+    S.valSac.confirmadoLejos = false; // si vuelve a salir, se vuelve a preguntar
+    return true;
+  }
+  if(ev.estado === "lejos"){
+    if(S.valSac.confirmadoLejos) return true;
+    const ok = await pregunta("Fuera de la parcela",
+      "Estás a <b>" + ev.dist + " m</b> de " + S.parcela + ".\n¿Seguro que esta sacudida es de " + S.parcela + "?",
+      {textoOK: "Sí, registrar", textoCancel: "Cancelar"});
+    if(ok) S.valSac.confirmadoLejos = true;
+    return ok;
+  }
+  if(ev.estado === "otra"){
+    modalConfirmar({
+      titulo: "Estás en otra parcela",
+      mensaje: "El GPS te sitúa en <b>" + ev.otra + "</b>, a " + ev.dist + " m de " + S.parcela + ".<br><br>Esta sacudida no se puede registrar en " + S.parcela + ".",
+      opciones: [
+        {texto: "Cambiar a " + ev.otra, color: "#0b6e4f", accion: () => cambiarParcelaConservando(ev.otra)},
+        {texto: "Cancelar", color: "#666", accion: () => {}}
+      ]
+    });
+    return false;
+  }
+  return true; // sin_gps / sin_poligono: no se puede comprobar
+}
+
+// Cambia de parcela sin perder lo marcado en la sacudida en curso
+async function cambiarParcelaConservando(cod){
+  const sel = document.getElementById("sel");
+  if(!sel || ![...sel.options].some(o => o.value === cod)){ aviso("La parcela " + cod + " no está en la lista"); return; }
+  const guardado = {
+    sac: JSON.parse(JSON.stringify(S.sacActual || {})),
+    obs: JSON.parse(JSON.stringify(S.obsActual || {})),
+    nota: (document.getElementById("nota") || {}).value || ""
+  };
+  sel.value = cod;
+  await cambParc();
+  S.sacActual = guardado.sac;
+  S.obsActual = guardado.obs;
+  const notaEl = document.getElementById("nota");
+  if(notaEl) notaEl.value = guardado.nota;
+  renderPlagas();
+  aviso("Cambiado a " + cod + ". Pulsa Guardar para registrar la sacudida.");
+}
+
+// ============================================================================
+// v26c: MÓDULO DE TRAMPAS
+// ----------------------------------------------------------------------------
+// Principio: TODO se guarda en el móvil. Nada se conecta solo al guardar.
+//   - Seguimiento (rutina): mapa + lista de la parcela, ✓ al revisar, progreso.
+//   - Colocación (ocasional): mapa + especie, fila y árbol, validado con el polígono.
+//   - Enviar al servidor: botón explícito.
+//   - Cargar trampas del servidor: botón explícito. La app solo COMPRUEBA (lectura,
+//     silenciosa) si hay trampas nuevas en el servidor y lo avisa.
+// Local:
+//   monitoreo.trampas            [{id_local, id, codigo, parcela, finca_id, plaga_cod, fila, arbol,
+//                                  lat, lon, precision, fecha_instalacion, fecha_retirada,
+//                                  instalada_por, nota, sinc, retirada_sinc, ultima_revision, ultimas_capturas}]
+//   monitoreo.revisiones_trampa  [{id_local, trampa_id_local, fecha, plaguero, lat, lon, precision,
+//                                  cambio_placa, cambio_cebo, nota, capturas:[{plaga_cod, sub_cod, cantidad}], sinc}]
+// ============================================================================
+const K_TRAMPAS = "monitoreo.trampas";
+const K_REV_TRAMPAS = "monitoreo.revisiones_trampa";
+const K_TRAMPAS_CHECK = "monitoreo.trampas_check_ts";
+const DIAS_REVISION_TRAMPA = 7;
+const COLOR_TRAMPA = {ANARSIA: "#BA7517", MOSCA: "#E87BA4", PIOJO: "#5B7C99"};
+let _sincTrampasEnCurso = false;
+
+function trampasLocal(){
+  try{ return JSON.parse(localStorage.getItem(K_TRAMPAS) || "[]"); } catch{ return []; }
+}
+function guardarTrampasLocal(arr){ localStorage.setItem(K_TRAMPAS, JSON.stringify(arr)); }
+function revisionesLocal(){
+  try{ return JSON.parse(localStorage.getItem(K_REV_TRAMPAS) || "[]"); } catch{ return []; }
+}
+function guardarRevisionesLocal(arr){ localStorage.setItem(K_REV_TRAMPAS, JSON.stringify(arr)); }
+function idLocalNuevo(prefijo){
+  return prefijo + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+function plagasTrampa(){ return CATALOGO.filter(p => regTrampa(p)); }
+function nombrePlaga(cod){ const p = CATALOGO.find(x => x.cod === cod); return p ? p.n : cod; }
+function colorTrampa(cod){ return COLOR_TRAMPA[cod] || "#b8771a"; }
+function trampasActivasFinca(){
+  const fA = fincaActiva();
+  if(!fA) return [];
+  return trampasLocal().filter(t => t.finca_id === fA.id && !t.fecha_retirada);
+}
+function trampasActivasParcela(parcela){ return trampasActivasFinca().filter(t => t.parcela === parcela); }
+function etiquetaTrampa(t){
+  return (t.fila && t.arbol) ? "Fila " + t.fila + " · Árbol " + t.arbol : "Sin fila/árbol · " + t.codigo;
+}
+function etiquetaCorta(t){ return (t.fila && t.arbol) ? t.fila + "·" + t.arbol : "?"; }
+function totalRevision(rv){ return (rv.capturas || []).reduce((a, c) => a + (c.cantidad || 0), 0); }
+function diaLocal(iso){ return new Date(iso).toLocaleDateString("sv-SE"); } // AAAA-MM-DD en hora local
+function hoyLocal(){ return new Date().toLocaleDateString("sv-SE"); }
+function diasDesde(iso){ return Math.floor((Date.now() - new Date(iso).getTime()) / 86400000); }
+
+// Última revisión conocida: la más reciente entre las locales y la que trajo el servidor
+function ultimaRevisionDe(t){
+  let ult = null;
+  revisionesLocal().filter(r => r.trampa_id_local === t.id_local).forEach(r => {
+    if(!ult || r.fecha > ult.fecha) ult = {fecha: r.fecha, capturas: totalRevision(r)};
+  });
+  if(t.ultima_revision && (!ult || t.ultima_revision > ult.fecha)){
+    ult = {fecha: t.ultima_revision, capturas: Number(t.ultimas_capturas) || 0};
+  }
+  return ult;
+}
+function revisadaHoy(t){ const u = ultimaRevisionDe(t); return !!(u && diaLocal(u.fecha) === hoyLocal()); }
+function nPendientesTrampas(){
+  const tr = trampasLocal().filter(t => !t.sinc || t.retirada_sinc === false).length;
+  const rv = revisionesLocal().filter(r => !r.sinc).length;
+  return tr + rv;
+}
+function parcelasFinca(){ return Object.keys(poligonosDeFincaActiva()).sort(); }
+
+// Parcela de trabajo de la pestaña: la elegida, o la del GPS, o la primera con trampas
+function parcelaTrampasActual(){
+  const lista = parcelasFinca();
+  if(S.traParcela && lista.includes(S.traParcela)) return S.traParcela;
+  if(S.parcelaDetectada && lista.includes(S.parcelaDetectada)) S.traParcela = S.parcelaDetectada;
+  else {
+    const conTrampas = lista.find(p => trampasActivasParcela(p).length > 0);
+    S.traParcela = conTrampas || lista[0] || null;
+  }
+  return S.traParcela;
+}
+function cambiarParcelaTrampas(cod){ guardarBorradorColocacion(); S.traParcela = cod; renderTrampas(); }
+function cambiarModoTrampas(modo){ guardarBorradorColocacion(); S.traModo = modo; renderTrampas(); }
+
+// ---------- Pantalla ----------
+function renderTrampas(){
+  const c = document.getElementById("trampas-cont");
+  if(!c) return;
+  const fA = fincaActiva();
+  if(!fA){ c.innerHTML = '<div class="vacio">Elige primero la finca activa en Admin.</div>'; return; }
+  const parcelas = parcelasFinca();
+  if(parcelas.length === 0){ c.innerHTML = '<div class="vacio">Descarga primero el mapa de la finca en Admin.</div>'; return; }
+  const modo = S.traModo || "seg";
+  const parcela = parcelaTrampasActual();
+  const especies = plagasTrampa();
+  const pend = nPendientesTrampas();
+  const tab = (m, txt) => '<button onclick="cambiarModoTrampas(\'' + m + '\')" style="flex:1;padding:10px;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;' +
+    (modo === m ? 'background:#0b6e4f;color:#fff' : 'background:#eef0ef;color:#5b6467') + '">' + txt + '</button>';
+
+  let html = '<div class="card">' +
+    '<div style="display:flex;gap:6px">' + tab("seg", "Seguimiento") + tab("col", "Colocación") + '</div>';
+
+  if(especies.length === 0){
+    html += '<div style="margin-top:10px;background:#fdecea;border:1px solid #c33;border-radius:8px;padding:10px;font-size:12px;color:#c33">' +
+      'El catálogo de este dispositivo no tiene especies de trampa. Ve a Admin y pulsa <b>Actualizar catálogos</b>.</div>';
+  }
+  // Aviso de trampas en el servidor que este móvil no tiene (solo si la comprobación lo detectó)
+  const sv = S.traServidor;
+  if(sv && sv.fincaId === fA.id && (sv.nuevas + sv.retiradas) > 0){
+    const partes = [];
+    if(sv.nuevas) partes.push(sv.nuevas + " trampa(s) nueva(s)");
+    if(sv.retiradas) partes.push(sv.retiradas + " retirada(s)");
+    html += '<div style="margin-top:10px;background:#e8f0fb;border:1px solid #1b5e9e;border-radius:8px;padding:10px;font-size:13px;color:#1b5e9e;display:flex;justify-content:space-between;align-items:center;gap:8px">' +
+      '<span>En el servidor hay ' + partes.join(" y ") + ' que este móvil no tiene.</span>' +
+      '<button class="btn btn-guardar" style="flex:none;padding:8px 12px;font-size:13px" onclick="descargarTrampasServidor()">Cargar</button></div>';
+  }
+  html += '<div style="margin-top:10px;display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;font-size:12px">' +
+    (pend > 0
+      ? '<span style="color:#b8771a;font-weight:700">' + pend + ' pendiente(s) de enviar</span>' +
+        '<button class="btn btn-s" style="flex:none;padding:6px 12px;font-size:12px" onclick="sincronizarTrampas()">Enviar al servidor</button>'
+      : '<span style="color:#0b6e4f">✓ Todo enviado</span>') +
+    '</div>';
+  // Parcela
+  html += '<div style="margin-top:10px;display:flex;gap:8px;align-items:center">' +
+    '<select class="parcela" style="flex:1" onchange="cambiarParcelaTrampas(this.value)">' +
+    parcelas.map(p => {
+      const act = trampasActivasParcela(p);
+      const hechas = act.filter(revisadaHoy).length;
+      const extra = act.length ? (modo === "seg" ? " · " + hechas + "/" + act.length + " hoy" : " · " + act.length + " trampas") : "";
+      return '<option value="' + p + '"' + (p === parcela ? ' selected' : '') + '>' + p + extra + '</option>';
+    }).join('') + '</select></div>';
+  if(S.parcelaDetectada && S.parcelaDetectada !== parcela && parcelas.includes(S.parcelaDetectada)){
+    html += '<div style="margin-top:6px;font-size:12px;color:#1b5e9e">El GPS te sitúa en <b>' + S.parcelaDetectada + '</b> ' +
+      '<button style="margin-left:6px;padding:3px 10px;border:1px solid #1b5e9e;background:#fff;color:#1b5e9e;border-radius:6px;font-size:12px;cursor:pointer" onclick="cambiarParcelaTrampas(\'' + S.parcelaDetectada + '\')">Ir</button></div>';
+  }
+  html += '</div>';
+  html += '<div id="mapa-trampas" style="height:240px;border-radius:10px;overflow:hidden;margin-top:8px;border:1px solid #d5dad8"></div>';
+  html += modo === "col" ? htmlColocacion(parcela, especies) : htmlSeguimiento(parcela);
+  c.innerHTML = html;
+  restaurarBorradorColocacion();
+  pintarMapaTrampas();
+}
+
+function htmlSeguimiento(parcela){
+  const act = trampasActivasParcela(parcela);
+  if(act.length === 0){
+    return '<div class="vacio">No hay trampas en ' + parcela + '.<br><br><span style="font-size:12px;color:#8b9295">Para colocarlas, usa la pestaña <b>Colocación</b>.</span></div>';
+  }
+  const hechas = act.filter(revisadaHoy).length;
+  let html = '';
+  if(hechas === act.length){
+    // Parcela completa: proponer la siguiente con pendientes
+    const siguiente = parcelasFinca().find(p => p !== parcela && trampasActivasParcela(p).some(t => !revisadaHoy(t)));
+    html += '<div class="card" style="background:#e2f0ea;border-color:#0b6e4f;text-align:center">' +
+      '<div style="font-size:16px;font-weight:700;color:#0b6e4f">' + parcela + ' completa ✓</div>' +
+      '<div style="font-size:12px;color:#5b6467;margin-top:2px">' + act.length + ' de ' + act.length + ' trampas revisadas hoy</div>' +
+      (siguiente ? '<button class="btn btn-guardar" style="margin-top:10px;padding:10px 16px" onclick="cambiarParcelaTrampas(\'' + siguiente + '\')">Siguiente: ' + siguiente + '</button>' : '<div style="font-size:12px;color:#0b6e4f;margin-top:8px">No quedan trampas pendientes hoy en la finca.</div>') +
+      '</div>';
+  } else {
+    html += '<div style="margin:10px 2px 0;font-size:14px;font-weight:700;color:#14181a">' + hechas + ' de ' + act.length + ' revisadas hoy</div>' +
+      '<div style="height:6px;background:#eef0ef;border-radius:3px;margin:6px 2px 0;overflow:hidden"><i style="display:block;height:100%;width:' + Math.round(hechas / act.length * 100) + '%;background:#0b6e4f"></i></div>';
+  }
+  const hayGPS = S.gps && S.gps.lat != null;
+  const grupos = {};
+  act.forEach(t => { (grupos[t.plaga_cod] = grupos[t.plaga_cod] || []).push(t); });
+  Object.keys(grupos).sort((a, b) => nombrePlaga(a).localeCompare(nombrePlaga(b))).forEach(cod => {
+    const lista = grupos[cod].sort((a, b) => (a.fila || 0) - (b.fila || 0) || (a.arbol || 0) - (b.arbol || 0));
+    html += '<div style="margin:14px 2px 4px;font-size:12px;font-weight:700;color:' + colorTrampa(cod) + ';text-transform:uppercase;letter-spacing:0.4px">' + nombrePlaga(cod) + ' · ' + lista.length + '</div>';
+    lista.forEach(t => {
+      const ok = revisadaHoy(t);
+      const ult = ultimaRevisionDe(t);
+      let estado;
+      if(ok) estado = '<span style="color:#0b6e4f;font-weight:700">✓ Revisada hoy · ' + ult.capturas + ' capt.</span>';
+      else if(!ult) estado = '<span style="color:#b8771a;font-weight:600">Pendiente · sin revisiones</span>';
+      else {
+        const dd = diasDesde(ult.fecha);
+        estado = '<span style="color:' + (dd >= DIAS_REVISION_TRAMPA ? '#b8771a' : '#5b6467') + ';font-weight:600">Pendiente · última hace ' + dd + ' d (' + ult.capturas + ' capt.)</span>';
+      }
+      const d = hayGPS && t.lat != null ? distanciaM(S.gps.lat, S.gps.lon, t.lat, t.lon) : null;
+      const dist = d != null ? (d >= 1000 ? (d / 1000).toFixed(1) + ' km' : Math.round(d) + ' m') : '';
+      html += '<div onclick="abrirRevisionTrampa(\'' + t.id_local + '\')" style="background:' + (ok ? '#f3faf6' : '#fff') + ';border:1px solid #d5dad8;border-left:5px solid ' + colorTrampa(cod) + ';border-radius:8px;padding:12px;margin-top:6px;cursor:pointer">' +
+        '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">' +
+          '<div style="font-size:17px;font-weight:700;color:#14181a">' + (ok ? '✓ ' : '') + etiquetaTrampa(t) + '</div>' +
+          '<div style="font-size:12px;color:#5b6467;white-space:nowrap">' + dist + '</div>' +
+        '</div>' +
+        '<div style="font-size:12px;margin-top:3px">' + estado + (!t.sinc ? ' <span style="font-size:10px;color:#b8771a">· sin enviar</span>' : '') + '</div>' +
+      '</div>';
+    });
+  });
+  return html;
+}
+
+function htmlColocacion(parcela, especies){
+  const estiloCampo = 'width:100%;padding:12px;border:1px solid #d5dad8;border-radius:8px;margin-top:6px;font-size:16px;background:#fff;box-sizing:border-box';
+  let html = '<div class="card">' +
+    '<div style="font-size:15px;font-weight:700;color:#14181a">Nueva trampa en ' + parcela + '</div>' +
+    '<div style="font-size:12px;color:#5b6467;margin:2px 0 10px">Hazlo junto a la trampa: se guarda tu posición actual.</div>' +
+    '<label style="font-size:12px;color:#5b6467;display:block;margin-bottom:10px">Especie<select id="nt-especie" style="' + estiloCampo + '">' +
+      '<option value="">- Elige especie -</option>' +
+      especies.map(p => '<option value="' + p.cod + '">' + p.n + '</option>').join('') +
+    '</select></label>' +
+    '<div style="display:flex;gap:10px">' +
+      '<label style="flex:1;font-size:12px;color:#5b6467">Fila<input id="nt-fila" type="number" inputmode="numeric" pattern="[0-9]*" min="1" step="1" style="' + estiloCampo + ';font-size:22px;font-weight:700;text-align:center"></label>' +
+      '<label style="flex:1;font-size:12px;color:#5b6467">Árbol<input id="nt-arbol" type="number" inputmode="numeric" pattern="[0-9]*" min="1" step="1" style="' + estiloCampo + ';font-size:22px;font-weight:700;text-align:center"></label>' +
+    '</div>' +
+    '<label style="font-size:12px;color:#5b6467;display:block;margin-top:10px">Nota (opcional)<input id="nt-nota" type="text" style="' + estiloCampo + '"></label>' +
+    '<div id="nt-gps" style="font-size:12px;border-radius:8px;padding:10px;margin-top:10px"></div>' +
+    '<button class="btn btn-guardar" style="width:100%;margin-top:12px;padding:14px" onclick="guardarNuevaTrampa()">Guardar trampa</button>' +
+  '</div>';
+  const act = trampasActivasParcela(parcela);
+  if(act.length){
+    html += '<div style="margin:12px 2px 4px;font-size:12px;font-weight:700;color:#5b6467;text-transform:uppercase;letter-spacing:0.4px">Colocadas en ' + parcela + ' · ' + act.length + '</div>';
+    act.sort((a, b) => a.plaga_cod.localeCompare(b.plaga_cod) || (a.fila || 0) - (b.fila || 0) || (a.arbol || 0) - (b.arbol || 0)).forEach(t => {
+      html += '<div onclick="abrirRevisionTrampa(\'' + t.id_local + '\')" style="background:#fff;border:1px solid #d5dad8;border-left:5px solid ' + colorTrampa(t.plaga_cod) + ';border-radius:8px;padding:10px 12px;margin-top:6px;cursor:pointer;font-size:14px">' +
+        '<b>' + etiquetaTrampa(t) + '</b> · ' + nombrePlaga(t.plaga_cod) + (!t.sinc ? ' <span style="font-size:10px;color:#b8771a">· sin enviar</span>' : '') + '</div>';
+    });
+  }
+  return html;
+}
+
+// El borrador del formulario de colocación sobrevive a los repintados (cambio de parcela/modo)
+function guardarBorradorColocacion(){
+  const e = document.getElementById("nt-especie");
+  if(!e) return;
+  S.traBorrador = {
+    especie: e.value,
+    fila: document.getElementById("nt-fila").value,
+    arbol: document.getElementById("nt-arbol").value,
+    nota: document.getElementById("nt-nota").value
+  };
+}
+function restaurarBorradorColocacion(){
+  const e = document.getElementById("nt-especie");
+  if(!e) return;
+  const b = S.traBorrador;
+  if(b){
+    e.value = b.especie || "";
+    document.getElementById("nt-fila").value = b.fila || "";
+    document.getElementById("nt-arbol").value = b.arbol || "";
+    document.getElementById("nt-nota").value = b.nota || "";
+  }
+  pintarEstadoGPSColocacion();
+}
+function pintarEstadoGPSColocacion(){
+  const el = document.getElementById("nt-gps");
+  if(!el) return;
+  const ev = evaluarPosicion(S.traParcela);
+  let txt, fondo, color;
+  if(ev.estado === "sin_gps") { txt = S.gps ? "Precisión GPS insuficiente (±" + S.gps.prec + " m). Espera unos segundos." : "Sin GPS. Pulsa \"Activar GPS\" arriba y espera a que fije posición."; fondo = "#fdecea"; color = "#c33"; }
+  else if(ev.estado === "dentro") { txt = "📍 Dentro de " + S.traParcela + " · ±" + S.gps.prec + " m"; fondo = "#e2f0ea"; color = "#0b6e4f"; }
+  else if(ev.estado === "margen") { txt = "📍 En el borde de " + S.traParcela + " (a " + ev.dist + " m) · ±" + S.gps.prec + " m"; fondo = "#fff5e0"; color = "#8a5a00"; }
+  else if(ev.estado === "lejos") { txt = "Estás a " + ev.dist + " m de " + S.traParcela + ". Se pedirá confirmación."; fondo = "#fdecea"; color = "#c33"; }
+  else if(ev.estado === "otra") { txt = "Estás en " + ev.otra + ", no en " + S.traParcela + "."; fondo = "#fdecea"; color = "#c33"; }
+  else { txt = "La parcela no tiene polígono: no se puede comprobar la posición."; fondo = "#eef0ef"; color = "#5b6467"; }
+  el.textContent = txt;
+  el.style.background = fondo;
+  el.style.color = color;
+}
+
+// ---------- Mapa de la pestaña ----------
+function pintarMapaTrampas(){
+  const el = document.getElementById("mapa-trampas");
+  if(!el || typeof L === "undefined") return;
+  if(MAPA.tra){ try{ MAPA.tra.remove(); }catch(e){} MAPA.tra = null; }
+  const map = L.map(el, {zoomControl: true, attributionControl: false});
+  MAPA.tra = map;
+  crearCapaTiles().addTo(map);
+  const polis = poligonosDeFincaActiva();
+  const parcela = S.traParcela;
+  let bounds = null;
+  Object.entries(polis).forEach(([cod, poly]) => {
+    const sel = cod === parcela;
+    const pl = L.polygon(poly.map(p => [p[1], p[0]]), {
+      color: sel ? "#ffea00" : "#ffffff", weight: sel ? 3 : 1, opacity: sel ? 1 : 0.5,
+      fillOpacity: sel ? 0.12 : 0.03, interactive: false
+    }).addTo(map);
+    if(sel) bounds = pl.getBounds();
+  });
+  const modo = S.traModo || "seg";
+  const act = trampasActivasParcela(parcela);
+  let cercana = null;
+  if(modo === "seg" && S.gps && S.gps.lat != null){
+    let dmin = Infinity;
+    act.filter(t => !revisadaHoy(t) && t.lat != null).forEach(t => {
+      const d = distanciaM(S.gps.lat, S.gps.lon, t.lat, t.lon);
+      if(d < dmin){ dmin = d; cercana = t.id_local; }
+    });
+  }
+  act.forEach(t => {
+    if(t.lat == null || t.lon == null) return;
+    const ok = revisadaHoy(t);
+    const destacada = t.id_local === cercana;
+    const tam = destacada ? 38 : 30;
+    const html = '<div style="width:' + tam + 'px;height:' + tam + 'px;border-radius:50%;background:' + colorTrampa(t.plaga_cod) + ';' +
+      'border:' + (destacada ? '4px solid #1b5e9e' : (ok ? '3px solid #0b6e4f' : '2px solid #fff')) + ';box-shadow:0 1px 4px rgba(0,0,0,0.5);' +
+      'color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;box-sizing:border-box">' +
+      (ok && modo === "seg" ? '✓' : etiquetaCorta(t)) + '</div>';
+    L.marker([t.lat, t.lon], {icon: L.divIcon({className: "", html, iconSize: [tam, tam], iconAnchor: [tam / 2, tam / 2]})})
+      .bindTooltip(nombrePlaga(t.plaga_cod) + " · " + etiquetaTrampa(t), {direction: "top"})
+      .on("click", () => abrirRevisionTrampa(t.id_local))
+      .addTo(map);
+  });
+  MAPA.traGPS = null;
+  actualizarGPSTrampas();
+  if(bounds) map.fitBounds(bounds, {padding: [15, 15]});
+  else map.setView([37.478, -5.9], 15);
+  setTimeout(() => { try{ map.invalidateSize(); }catch(e){} }, 120);
+}
+// Llamada en cada lectura del GPS: solo mueve el punto azul y el aviso de posición (no repinta formularios)
+function actualizarGPSTrampas(){
+  const v = document.getElementById("v-tra");
+  if(!v || v.style.display === "none" || !MAPA.tra) return;
+  if(S.gps && S.gps.lat != null){
+    if(MAPA.traGPS) MAPA.traGPS.setLatLng([S.gps.lat, S.gps.lon]);
+    else MAPA.traGPS = L.circleMarker([S.gps.lat, S.gps.lon], {radius: 8, color: "#fff", weight: 3, fillColor: "#1b5e9e", fillOpacity: 1}).addTo(MAPA.tra);
+  }
+  pintarEstadoGPSColocacion();
+}
+
+// ---------- Colocación ----------
+async function guardarNuevaTrampa(){
+  const fA = fincaActiva();
+  const parcela = S.traParcela;
+  const plagaCod = document.getElementById("nt-especie").value;
+  const filaTxt = String(document.getElementById("nt-fila").value).trim();
+  const arbolTxt = String(document.getElementById("nt-arbol").value).trim();
+  const nota = document.getElementById("nt-nota").value.trim();
+  if(!fA || !parcela){ aviso("Elige la parcela"); return; }
+  if(!plagaCod){ aviso("Elige la especie"); return; }
+  if(!/^\d+$/.test(filaTxt) || parseInt(filaTxt, 10) < 1){ aviso("Indica la fila (número entero)"); return; }
+  if(!/^\d+$/.test(arbolTxt) || parseInt(arbolTxt, 10) < 1){ aviso("Indica el árbol (número entero)"); return; }
+  const fila = parseInt(filaTxt, 10), arbol = parseInt(arbolTxt, 10);
+  if(!S.gps || S.gps.lat == null){ aviso("Necesito tu posición GPS para guardar la trampa"); return; }
+  if(S.gps.prec > PRECISION_MAX_M){ aviso("Precisión GPS insuficiente (±" + S.gps.prec + " m). Espera unos segundos."); return; }
+  // Una sola trampa activa por especie, parcela, fila y árbol
+  const repetida = trampasActivasParcela(parcela).find(t => t.plaga_cod === plagaCod && t.fila === fila && t.arbol === arbol);
+  if(repetida){ aviso("Ya hay una trampa de " + nombrePlaga(plagaCod) + " en fila " + fila + ", árbol " + arbol); return; }
+  // Validación con el polígono
+  const ev = evaluarPosicion(parcela);
+  if(ev.estado === "otra"){
+    guardarBorradorColocacion();
+    modalConfirmar({
+      titulo: "Estás en otra parcela",
+      mensaje: "El GPS te sitúa en <b>" + ev.otra + "</b>, a " + ev.dist + " m de " + parcela + ".<br><br>No se puede colocar una trampa de " + parcela + " aquí.",
+      opciones: [
+        {texto: "Cambiar a " + ev.otra, color: "#0b6e4f", accion: () => cambiarParcelaTrampas(ev.otra)},
+        {texto: "Cancelar", color: "#666", accion: () => {}}
+      ]
+    });
+    return;
+  }
+  if(ev.estado === "lejos"){
+    const ok = await pregunta("Fuera de la parcela",
+      "Estás a <b>" + ev.dist + " m</b> de " + parcela + ".\n¿Seguro que quieres colocar aquí la trampa de " + parcela + "?",
+      {textoOK: "Sí, colocar", textoCancel: "Cancelar"});
+    if(!ok) return;
+  }
+  const trampa = {
+    id_local: idLocalNuevo("T"),
+    id: null,
+    codigo: parcela + "-" + plagaCod + "-F" + fila + "A" + arbol,
+    parcela: parcela,
+    finca_id: fA.id,
+    plaga_cod: plagaCod,
+    fila: fila,
+    arbol: arbol,
+    lat: S.gps.lat, lon: S.gps.lon, precision: S.gps.prec,
+    fecha_instalacion: new Date().toISOString(),
+    fecha_retirada: null,
+    instalada_por: localStorage.getItem(K_PLAGUERO) || "",
+    nota: nota || null,
+    sinc: false,
+    retirada_sinc: true
+  };
+  const todas = trampasLocal();
+  todas.push(trampa);
+  guardarTrampasLocal(todas);
+  // Se conserva la especie para colocar la siguiente; se limpian fila, árbol y nota
+  S.traBorrador = {especie: plagaCod, fila: "", arbol: "", nota: ""};
+  aviso("Trampa guardada · " + nombrePlaga(plagaCod) + " · " + etiquetaTrampa(trampa) + (ev.estado === "margen" ? " (borde de parcela)" : ""));
+  renderTrampas();
+}
+
+// ---------- Revisión ----------
+function abrirRevisionTrampa(idLocal){
+  const t = trampasLocal().find(x => x.id_local === idLocal);
+  if(!t){ aviso("Trampa no encontrada"); return; }
+  const pDef = CATALOGO.find(x => x.cod === t.plaga_cod);
+  const reg = pDef ? regTrampa(pDef) : null;
+  const campos = (reg && reg.por_sub && pDef.subs)
+    ? pDef.subs.map(s => ({sub: s.cod, label: s.n}))
+    : [{sub: "", label: "Capturas desde la última revisión"}];
+  const ult = ultimaRevisionDe(t);
+  const yaHoy = revisadaHoy(t);
+  const ultTxt = ult
+    ? 'Última revisión: ' + new Date(ult.fecha).toLocaleDateString("es-ES", {day: "2-digit", month: "2-digit"}) + ' · <b>' + ult.capturas + '</b> capturas'
+    : 'Primera revisión de esta trampa';
+  let html = '<div style="font-size:12px;font-weight:700;color:' + colorTrampa(t.plaga_cod) + ';text-transform:uppercase;letter-spacing:0.4px">' + nombrePlaga(t.plaga_cod) + ' · ' + t.parcela + '</div>' +
+    '<h3 style="margin:2px 0 2px;color:#14181a;font-size:22px">' + etiquetaTrampa(t) + '</h3>' +
+    '<div style="font-size:11px;color:#8b9295">' + t.codigo + '</div>' +
+    '<div style="font-size:12px;color:#5b6467;margin:6px 0 4px">' + ultTxt + '</div>' +
+    (yaHoy ? '<div style="font-size:12px;color:#b8771a;margin-bottom:6px">Ya se revisó hoy. Se guardará una revisión más.</div>' : '') +
+    '<div id="rt-dist" style="font-size:12px;margin-bottom:10px"></div>';
+  campos.forEach((cp, i) => {
+    html += '<label style="font-size:13px;color:#14181a;font-weight:600;display:block;margin-bottom:10px">' + cp.label +
+      '<input id="rt-n-' + i + '" type="number" inputmode="numeric" pattern="[0-9]*" min="0" step="1" placeholder="0" ' +
+      'style="width:100%;padding:14px;border:2px solid #0b6e4f;border-radius:10px;margin-top:6px;font-size:28px;font-weight:700;text-align:center;color:#0b6e4f;box-sizing:border-box">' +
+    '</label>';
+  });
+  html += '<label style="display:flex;align-items:center;gap:10px;font-size:14px;color:#14181a;padding:8px 2px">' +
+      '<input id="rt-placa" type="checkbox" style="width:22px;height:22px"> Cambio de placa / limpieza</label>' +
+    '<label style="display:flex;align-items:center;gap:10px;font-size:14px;color:#14181a;padding:8px 2px">' +
+      '<input id="rt-cebo" type="checkbox" style="width:22px;height:22px"> Cambio de cebo / feromona</label>' +
+    '<textarea id="rt-nota" placeholder="Nota (opcional)" style="width:100%;margin-top:6px;padding:10px;border:1px solid #d5dad8;border-radius:8px;font-size:14px;min-height:50px;box-sizing:border-box"></textarea>' +
+    '<div style="margin-top:14px;display:flex;gap:8px">' +
+      '<button class="btn btn-s" style="flex:1" onclick="cerrar()">Cancelar</button>' +
+      '<button class="btn btn-guardar" style="flex:1.4" id="rt-guardar">Guardar revisión</button>' +
+    '</div>' +
+    '<div style="margin-top:18px;text-align:center">' +
+      '<button style="background:none;border:none;color:#c33;font-size:12px;text-decoration:underline;cursor:pointer" id="rt-retirar">Retirar trampa (fin de temporada)</button>' +
+    '</div>';
+  document.getElementById("hoja").innerHTML = html;
+  document.getElementById("velo").classList.add("on");
+  // Distancia a la trampa (informativa)
+  const distEl = document.getElementById("rt-dist");
+  const distTrampa = () => (S.gps && S.gps.lat != null && S.gps.prec <= PRECISION_MAX_M && t.lat != null)
+    ? Math.round(distanciaM(S.gps.lat, S.gps.lon, t.lat, t.lon)) : null;
+  const d0 = distTrampa();
+  if(d0 != null){
+    distEl.textContent = "Estás a " + d0 + " m de esta trampa";
+    distEl.style.color = d0 > DIST_AVISO_TRAMPA_M ? "#c33" : "#0b6e4f";
+  }
+  setTimeout(() => { const el = document.getElementById("rt-n-0"); if(el) el.focus(); }, 150);
+
+  document.getElementById("rt-guardar").onclick = async () => {
+    const capturas = [];
+    for(let i = 0; i < campos.length; i++){
+      const raw = String(document.getElementById("rt-n-" + i).value).trim();
+      if(raw === ""){ aviso("Introduce el número (0 si no hay capturas)"); return; }
+      if(!/^\d+$/.test(raw)){ aviso("Solo números enteros"); return; }
+      capturas.push({plaga_cod: t.plaga_cod, sub_cod: campos[i].sub, cantidad: parseInt(raw, 10)});
+    }
+    // Validación: ¿estás en ESTA trampa? (solo en trampas)
+    const d = distTrampa();
+    if(d != null && d > DIST_AVISO_TRAMPA_M){
+      const ok = await pregunta("¿Es esta la trampa?",
+        "Estás a <b>" + d + " m</b> de " + nombrePlaga(t.plaga_cod) + " · " + etiquetaTrampa(t) + ".\n¿Seguro que es esta trampa?",
+        {textoOK: "Sí, es esta", textoCancel: "Revisar"});
+      if(!ok) return;
+    }
+    // Posible error de tecleo
+    const total = capturas.reduce((a, c) => a + c.cantidad, 0);
+    const ref = ult ? ult.capturas : 0;
+    if(total > Math.max(50, ref * 3)){
+      const ok = await pregunta("¿El número es correcto?",
+        "Has puesto <b>" + total + "</b> capturas.\n" +
+        (ult ? "En la revisión anterior fueron " + ref + "." : "Es la primera revisión de esta trampa."),
+        {textoOK: "Sí, es correcto", textoCancel: "Corregir"});
+      if(!ok) return;
+    }
+    const revs = revisionesLocal();
+    revs.push({
+      id_local: idLocalNuevo("R"),
+      trampa_id_local: t.id_local,
+      fecha: new Date().toISOString(),
+      plaguero: localStorage.getItem(K_PLAGUERO) || "",
+      lat: S.gps ? S.gps.lat : null,
+      lon: S.gps ? S.gps.lon : null,
+      precision: S.gps ? S.gps.prec : null,
+      cambio_placa: document.getElementById("rt-placa").checked,
+      cambio_cebo: document.getElementById("rt-cebo").checked,
+      nota: document.getElementById("rt-nota").value.trim() || null,
+      capturas: capturas,
+      sinc: false
+    });
+    guardarRevisionesLocal(revs);
+    cerrar();
+    const act = trampasActivasParcela(t.parcela);
+    const hechas = act.filter(revisadaHoy).length;
+    aviso("✓ " + etiquetaTrampa(t) + " · " + total + " capturas" + (hechas === act.length ? " · " + t.parcela + " completa" : " · " + hechas + "/" + act.length));
+    renderTrampas();
+  };
+
+  document.getElementById("rt-retirar").onclick = async () => {
+    const ok = await pregunta("Retirar trampa",
+      nombrePlaga(t.plaga_cod) + " · " + etiquetaTrampa(t) + " dejará de aparecer.\nSu histórico se conserva.",
+      {textoOK: "Retirar", textoCancel: "Cancelar", tipo: "peligro"});
+    if(!ok) return;
+    const todas = trampasLocal();
+    const x = todas.find(y => y.id_local === t.id_local);
+    if(!x) return;
+    x.fecha_retirada = new Date().toISOString();
+    if(x.sinc) x.retirada_sinc = false; // ya está en el servidor: hay que enviar la retirada
+    guardarTrampasLocal(todas);
+    cerrar();
+    aviso("Trampa retirada");
+    renderTrampas();
+  };
+}
+
+// ---------- Envío al servidor (solo cuando el plaguero lo pide; idempotente) ----------
+async function sincronizarTrampas(){
+  if(_sincTrampasEnCurso) return;
+  if(!navigator.onLine){ aviso("Sin conexión. Envía cuando tengas cobertura."); return; }
+  _sincTrampasEnCurso = true;
+  let nTr = 0, nRv = 0;
+  try{
+    const trampas = trampasLocal();
+    const revs = revisionesLocal();
+    // Validar ANTES de escribir nada: catálogo con especies y registros de trampa
+    trampas.filter(t => !t.sinc).forEach(t => {
+      if(!getPlagaId(t.plaga_cod) || !getRegistroId(t.plaga_cod, "TRAMPA", "individuos")){
+        throw new Error("Catálogo desactualizado (" + t.plaga_cod + "). Ve a Admin → Actualizar catálogos.");
+      }
+    });
+    revs.filter(r => !r.sinc).forEach(r => {
+      const t = trampas.find(x => x.id_local === r.trampa_id_local);
+      if(!t) throw new Error("Revisión sin trampa local (" + r.id_local + ")");
+      if(!getRegistroId(t.plaga_cod, "TRAMPA", "individuos")){
+        throw new Error("Catálogo desactualizado (" + t.plaga_cod + "). Ve a Admin → Actualizar catálogos.");
+      }
+    });
+    // 1. Trampas nuevas
+    for(const t of trampas.filter(x => !x.sinc)){
+      const ex = await supabaseGet("trampas", "select=id&id_local=eq." + encodeURIComponent(t.id_local));
+      if(ex.length){
+        t.id = ex[0].id;
+      } else {
+        const parc = await supabaseGet("parcelas",
+          "select=id&codigo=eq." + encodeURIComponent(t.parcela) + "&finca_id=eq." + t.finca_id);
+        if(!parc.length) throw new Error("Parcela " + t.parcela + " no encontrada en el servidor");
+        const res = await supabasePost("trampas", {
+          id_local: t.id_local,
+          codigo: t.codigo,
+          parcela_id: parc[0].id,
+          plaga_id: getPlagaId(t.plaga_cod),
+          fila: t.fila || null,
+          arbol: t.arbol || null,
+          gps_lat: t.lat, gps_lon: t.lon, gps_precision: t.precision,
+          fecha_instalacion: t.fecha_instalacion,
+          fecha_retirada: t.fecha_retirada || null,
+          instalada_por: t.instalada_por || null,
+          nota: t.nota || null
+        });
+        t.id = res[0].id;
+      }
+      t.sinc = true;
+      t.retirada_sinc = true;
+      guardarTrampasLocal(trampas);
+      nTr++;
+    }
+    // 2. Retiradas de trampas que ya estaban en el servidor
+    for(const t of trampas.filter(x => x.sinc && x.retirada_sinc === false)){
+      await supabasePatch("trampas", "id=eq." + t.id, {fecha_retirada: t.fecha_retirada});
+      t.retirada_sinc = true;
+      guardarTrampasLocal(trampas);
+      nTr++;
+    }
+    // 3. Revisiones + capturas
+    for(const r of revs.filter(x => !x.sinc)){
+      const t = trampas.find(x => x.id_local === r.trampa_id_local);
+      if(!t || !t.id) continue;
+      let revId;
+      const ex = await supabaseGet("revisiones_trampa", "select=id&id_local=eq." + encodeURIComponent(r.id_local));
+      if(ex.length){
+        revId = ex[0].id;
+      } else {
+        const res = await supabasePost("revisiones_trampa", {
+          id_local: r.id_local,
+          trampa_id: t.id,
+          fecha: r.fecha,
+          plaguero: r.plaguero || null,
+          gps_lat: r.lat, gps_lon: r.lon, gps_precision: r.precision,
+          cambio_placa: !!r.cambio_placa,
+          cambio_cebo: !!r.cambio_cebo,
+          nota: r.nota || null
+        });
+        revId = res[0].id;
+      }
+      const capEx = await supabaseGet("capturas_trampa", "select=id&revision_id=eq." + revId);
+      if(!capEx.length){
+        await supabasePost("capturas_trampa", (r.capturas || []).map(c => ({
+          revision_id: revId,
+          plaga_id: getPlagaId(c.plaga_cod),
+          subtipo_id: c.sub_cod ? getSubtipoId(c.plaga_cod, c.sub_cod) : null,
+          registro_id: getRegistroId(c.plaga_cod, "TRAMPA", "individuos"),
+          cantidad: c.cantidad
+        })));
+      }
+      r.sinc = true;
+      guardarRevisionesLocal(revs);
+      nRv++;
+    }
+    aviso((nTr + nRv) > 0 ? "Enviado: " + nTr + " trampa(s), " + nRv + " revisión(es)" : "Nada pendiente");
+  } catch(e){
+    console.error("Error enviando trampas:", e);
+    aviso("No se pudo enviar: " + e.message + ". Lo enviado queda guardado; reintenta más tarde.");
+  } finally {
+    _sincTrampasEnCurso = false;
+    renderTrampas();
+  }
+}
+
+// ---------- Comprobación silenciosa: ¿hay trampas en el servidor que este móvil no tiene? ----------
+// Solo LECTURA. No envía nada. Si no hay red, la sesión ha caducado o el servidor no
+// responde, no hace nada (no abre el login ni muestra errores).
+function jwtVigente(){
+  const tk = localStorage.getItem("segplagas_jwt");
+  if(!tk) return null;
+  try{
+    const p = JSON.parse(atob(tk.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    if(p.exp && p.exp * 1000 < Date.now() + 30000) return null;
+  } catch(e){}
+  return tk;
+}
+async function comprobarTrampasServidor(forzar){
+  const fA = fincaActiva();
+  if(!fA || !navigator.onLine) return;
+  const tk = jwtVigente();
+  if(!tk) return;
+  const ultimo = parseInt(localStorage.getItem(K_TRAMPAS_CHECK) || "0", 10);
+  if(!forzar && Date.now() - ultimo < 5 * 60 * 1000) return;
+  localStorage.setItem(K_TRAMPAS_CHECK, String(Date.now()));
+  try{
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 8000);
+    const resp = await fetch(SUPABASE_URL + "/rest/v1/v_trampas_estado?select=id_local&finca_id=eq." + fA.id + "&fecha_retirada=is.null", {
+      headers: {"apikey": SUPABASE_KEY, "Authorization": "Bearer " + tk, "Accept-Profile": "segPlagas"},
+      signal: ctrl.signal
+    });
+    clearTimeout(to);
+    if(!resp.ok) return;
+    const filas = await resp.json();
+    const enServidor = new Set(filas.map(f => f.id_local));
+    const locales = trampasLocal().filter(t => t.finca_id === fA.id);
+    const idsLocales = new Set(locales.map(t => t.id_local));
+    const nuevas = filas.filter(f => !idsLocales.has(f.id_local)).length;
+    const retiradas = locales.filter(t => t.sinc && !t.fecha_retirada && !enServidor.has(t.id_local)).length;
+    S.traServidor = {fincaId: fA.id, nuevas, retiradas};
+    const v = document.getElementById("v-tra");
+    if(v && v.style.display !== "none" && (nuevas + retiradas) > 0){ guardarBorradorColocacion(); renderTrampas(); }
+  } catch(e){ /* silencioso */ }
+}
+
+// ---------- Carga de trampas del servidor (botón "Cargar") ----------
+async function descargarTrampasServidor(){
+  const fA = fincaActiva();
+  if(!fA) return;
+  if(!navigator.onLine){ aviso("Sin conexión"); return; }
+  try{
+    const filas = await supabaseGet("v_trampas_estado", "select=*&finca_id=eq." + fA.id + "&fecha_retirada=is.null");
+    const todas = trampasLocal();
+    const idsServidor = new Set();
+    filas.forEach(f => {
+      idsServidor.add(f.id_local);
+      let t = todas.find(x => x.id_local === f.id_local);
+      if(!t){
+        t = {
+          id_local: f.id_local, codigo: f.codigo, parcela: f.parcela, finca_id: f.finca_id,
+          plaga_cod: f.plaga_codigo,
+          lat: Number(f.gps_lat), lon: Number(f.gps_lon),
+          precision: f.gps_precision != null ? Number(f.gps_precision) : null,
+          fecha_instalacion: f.fecha_instalacion, fecha_retirada: null,
+          instalada_por: f.instalada_por, nota: f.nota,
+          retirada_sinc: true
+        };
+        todas.push(t);
+      }
+      t.id = f.trampa_id;
+      t.sinc = true;
+      t.fila = f.fila != null ? Number(f.fila) : (t.fila || null);
+      t.arbol = f.arbol != null ? Number(f.arbol) : (t.arbol || null);
+      t.ultima_revision = f.ultima_revision || null;
+      t.ultimas_capturas = f.ultimas_capturas != null ? Number(f.ultimas_capturas) : null;
+    });
+    // Trampas ya enviadas que el servidor ya no tiene activas = retiradas desde otro dispositivo
+    todas.forEach(t => {
+      if(t.finca_id === fA.id && t.sinc && !t.fecha_retirada && !idsServidor.has(t.id_local)){
+        t.fecha_retirada = new Date().toISOString();
+        t.retirada_sinc = true;
+      }
+    });
+    guardarTrampasLocal(todas);
+    S.traServidor = {fincaId: fA.id, nuevas: 0, retiradas: 0};
+    aviso(filas.length + " trampa(s) activa(s) en " + fA.codigo + " cargadas en el móvil");
+  } catch(e){
+    console.error("Error cargando trampas:", e);
+    aviso("No se pudieron cargar: " + e.message);
+  } finally {
+    guardarBorradorColocacion();
+    renderTrampas();
+  }
+}
+
 function ir(v){
   // al salir de admin, resetear S.admin para forzar PIN de nuevo la próxima vez
   if(v !== "admin" && S.admin){
@@ -2121,15 +3526,18 @@ function ir(v){
     if(pinInput) pinInput.value = "";
   }
   document.getElementById("v-sac").style.display = v==="sac" ? "block" : "none";
+  document.getElementById("v-tra").style.display = v==="tra" ? "block" : "none";
   document.getElementById("v-mapa").style.display = v==="mapa" ? "block" : "none";
   document.getElementById("v-res").style.display = v==="res" ? "block" : "none";
   document.getElementById("v-rec").style.display = v==="rec" ? "block" : "none";
   document.getElementById("v-admin").style.display = v==="admin" ? "block" : "none";
   document.getElementById("t-sac").className = v==="sac" ? "on" : "";
+  document.getElementById("t-tra").className = v==="tra" ? "on" : "";
   document.getElementById("t-mapa").className = v==="mapa" ? "on" : "";
   document.getElementById("t-res").className = v==="res" ? "on" : "";
   document.getElementById("t-rec").className = v==="rec" ? "on" : "";
   document.getElementById("t-admin").className = v==="admin" ? "on" : "";
+  if(v==="tra"){ renderTrampas(); comprobarTrampasServidor(); }
   if(v==="res") renderListaParcelas();
   if(v==="rec") renderRecientes();
   if(v==="sac") setTimeout(pintarMini, 50);
@@ -2437,12 +3845,17 @@ function importarMuestreoExcel(){
             lon: (f.gps_lon !== "" && f.gps_lon != null) ? Number(f.gps_lon) : null,
             gps_prec: (f.gps_precision !== "" && f.gps_precision != null) ? Number(f.gps_precision) : null,
             plagas: {},
+            obs: {},
             sin_capturas: false
           };
         }
         // Añadir plaga a esta sacudida
         if(f.plaga_cod === "(sin capturas)" || !f.plaga_cod){
           sacPorId[sid].sin_capturas = true;
+        } else if(f.organo && !(f.organo === "SACUDIDA" && f.tipo === "individuos")){
+          // v26a: observación (presencia / daño / otro órgano)
+          const k = claveObs(f.plaga_cod, f.organo, f.tipo, f.subtipo_cod || "");
+          sacPorId[sid].obs[k] = (sacPorId[sid].obs[k] || 0) + (Number(f.cantidad) || 1);
         } else {
           const cod = f.plaga_cod;
           // El Excel guarda "subtipo_nombre" (ej "Vivas", "Muertas", "Negro"). Mapear al código interno.
@@ -2515,7 +3928,7 @@ function importarMuestreoExcel(){
             diagSubtiposDetalle[k] = (diagSubtiposDetalle[k] || 0) + v;
           }
         });
-        const tieneAlgo = totalCapturasEn(s) > 0;
+        const tieneAlgo = totalCapturasEn(s) > 0 || Object.values(s.obs || {}).some(v => v > 0);
         if(tieneAlgo) s.sin_capturas = false;
         sacsFinales.push(s);
       });
@@ -2668,6 +4081,7 @@ function generarPDFMuestreo(muestreoId){
       'PULGON':[227,73,72], 'ARANA':[74,58,167], 'MOSCA':[232,123,164],
       'ANARSIA':[186,117,23], 'CABEZUDO':[139,90,43], 'HORMIGAS':[70,40,20],
       'LEPRA':[24,95,165], 'OIDIO':[153,153,153], 'ROYA':[178,73,27],
+      'MONILIA':[121,84,160], 'FUSICOCUM':[96,74,48],
       'OTROS':[100,100,100]
     };
     // Colores específicos por subtipo — MUY distintos para que se vean bien
@@ -2861,6 +4275,45 @@ function generarPDFMuestreo(muestreoId){
     }
     y += 5;
 
+    // ==== v26a: Observaciones (presencia / daño por órgano) ====
+    const obsTotPDF = {};
+    sacs.forEach(s => {
+      Object.entries(s.obs || {}).forEach(([k, v]) => { if(v > 0) obsTotPDF[k] = (obsTotPDF[k] || 0) + 1; });
+    });
+    const obsOrdenPDF = Object.entries(obsTotPDF).sort((a,b) => b[1] - a[1]);
+    if(obsOrdenPDF.length && total > 0){
+      doc.setTextColor(20,24,26);
+      doc.setFont("helvetica","bold");
+      doc.setFontSize(10);
+      doc.text("Observaciones (presencia / daño)", MG, y);
+      y += 3;
+      doc.setDrawColor(220,220,220);
+      doc.line(MG, y, PW - MG, y);
+      y += 4;
+      doc.setFont("helvetica","normal");
+      doc.setFontSize(8.5);
+      const xBo = MG + 95, aBo = 45;
+      obsOrdenPDF.forEach(([k, nSac]) => {
+        const o = parseClaveObs(k);
+        const pct = Math.round(nSac / total * 100);
+        const c = colorSubtipo(o.cod, o.subCod);
+        doc.setFillColor(c[0], c[1], c[2]);
+        doc.circle(MG + 3, y + 3, 1.4, "F");
+        doc.setTextColor(20,24,26);
+        doc.text(etiquetaObs(k), MG + 7, y + 4);
+        doc.setFillColor(230,235,232);
+        doc.rect(xBo, y + 1.5, aBo, 3, "F");
+        doc.setFillColor(c[0], c[1], c[2]);
+        doc.rect(xBo, y + 1.5, aBo * pct/100, 3, "F");
+        doc.text(pct + "%", xBo + aBo + 12, y + 4, {align:"right"});
+        doc.text(nSac + " sacs", xBo + aBo + 32, y + 4, {align:"right"});
+        y += 6;
+      });
+      y += 5;
+    }
+    // Si el mapa no cabe en la página, pasa a la siguiente
+    if(y + 8 + 130 > PH - 12){ doc.addPage(); y = 18; }
+
     // ==== Mapa visual ====
     doc.setTextColor(20,24,26);
     doc.setFont("helvetica","bold");
@@ -2980,6 +4433,7 @@ function generarPDFMuestreo(muestreoId){
 
     // Helper: subtipo activo o no
     function subActivo(cod, subCod){
+      if(esAuxiliar(cod)) return false; // v26a: los auxiliares nunca son foco
       const p = CATALOGO.find(x => x.cod === cod);
       if(!p || !p.subs) return true; // sin subtipos → siempre activo
       if(!subCod) return true;
@@ -2989,6 +4443,7 @@ function generarPDFMuestreo(muestreoId){
 
     // Helper: cantidad activa de una plaga en una sacudida (excluye subtipos con activo:false)
     function cantidadActiva(sac, cod){
+      if(esAuxiliar(cod)) return 0; // v26a: los auxiliares nunca son foco
       if(!sac || !sac.plagas || sac.plagas[cod] == null) return 0;
       const v = sac.plagas[cod];
       if(typeof v !== "object") return v || 0;
@@ -3411,7 +4866,7 @@ function construirExcel(msSubset, nombreArchivo){
       gps_lon: s.lon,
       gps_precision: s.precision || s.gps_prec || ""
     };
-    // Construir capturas expandiendo subtipos
+    // Construir capturas expandiendo subtipos (v26a: + órgano · tipo y observaciones)
     const capturas = [];
     Object.entries(s.plagas || {}).forEach(([cod, v]) => {
       if(v == null) return;
@@ -3419,17 +4874,23 @@ function construirExcel(msSubset, nombreArchivo){
         // Con subtipos
         Object.entries(v).forEach(([subCod, subN]) => {
           if(subN > 0){
-            capturas.push({cod, subCod, cantidad: subN});
+            capturas.push({cod, subCod, cantidad: subN, organo: "SACUDIDA", tipo: "individuos"});
           }
         });
       } else if(v > 0){
-        capturas.push({cod, subCod: "", cantidad: v});
+        capturas.push({cod, subCod: "", cantidad: v, organo: "SACUDIDA", tipo: "individuos"});
+      }
+    });
+    Object.entries(s.obs || {}).forEach(([k, v]) => {
+      if(v > 0){
+        const o = parseClaveObs(k);
+        capturas.push({cod: o.cod, subCod: o.subCod, cantidad: v, organo: o.organo, tipo: o.tipo});
       }
     });
     if(capturas.length === 0){
-      filas.push({...base, plaga_cod: "", plaga_nombre: "(sin capturas)", subtipo_nombre: "", cantidad: 0});
+      filas.push({...base, plaga_cod: "", plaga_nombre: "(sin capturas)", subtipo_nombre: "", subtipo_cod: "", organo: "", tipo: "", cantidad: 0});
     } else {
-      capturas.forEach(({cod, subCod, cantidad}) => {
+      capturas.forEach(({cod, subCod, cantidad, organo, tipo}) => {
         const p = CATALOGO.find(x => x.cod === cod);
         let subNombre = "";
         if(subCod && p && p.subs){
@@ -3441,6 +4902,9 @@ function construirExcel(msSubset, nombreArchivo){
           plaga_cod: cod,
           plaga_nombre: p ? p.n : cod,
           subtipo_nombre: subNombre,
+          subtipo_cod: subCod || "",
+          organo: organo || "",
+          tipo: tipo || "",
           cantidad
         });
       });
@@ -3483,7 +4947,7 @@ function construirExcel(msSubset, nombreArchivo){
       const conP = sacs.filter(s => cantSacudida(s, p.cod) > 0);
       const nPresencia = conP.length;
       if(nPresencia === 0) return;
-      const totalIndividuos = conP.reduce((a, s) => a + (s.plagas[p.cod] || 0), 0);
+      const totalIndividuos = conP.reduce((a, s) => a + cantSacudida(s, p.cod), 0);
       const mediaPorSacudidaConPresencia = totalIndividuos / nPresencia;
       filasResumen.push({
         muestreo_id: m.id,
@@ -3492,11 +4956,36 @@ function construirExcel(msSubset, nombreArchivo){
         status: m.status,
         plaga_cod: p.cod,
         plaga_nombre: p.n,
+        organo: "SACUDIDA",
+        tipo: "individuos",
         total_sacudidas_muestreo: sacs.length,
         sacudidas_con_presencia: nPresencia,
         porcentaje_presencia: Math.round(nPresencia / sacs.length * 100 * 10) / 10,
         total_individuos: totalIndividuos,
         media_por_sacudida_con_presencia: Math.round(mediaPorSacudidaConPresencia * 10) / 10
+      });
+    });
+    // v26a: observaciones (presencia / daño)
+    const obsTot = {};
+    sacs.forEach(s => {
+      Object.entries(s.obs || {}).forEach(([k, v]) => { if(v > 0) obsTot[k] = (obsTot[k] || 0) + 1; });
+    });
+    Object.entries(obsTot).forEach(([k, nSac]) => {
+      const o = parseClaveObs(k);
+      filasResumen.push({
+        muestreo_id: m.id,
+        parcela: m.parcela,
+        fecha_inicio: m.fecha_inicio || "",
+        status: m.status,
+        plaga_cod: o.cod,
+        plaga_nombre: etiquetaObs(k),
+        organo: o.organo,
+        tipo: o.tipo,
+        total_sacudidas_muestreo: sacs.length,
+        sacudidas_con_presencia: nSac,
+        porcentaje_presencia: Math.round(nSac / sacs.length * 100 * 10) / 10,
+        total_individuos: "",
+        media_por_sacudida_con_presencia: ""
       });
     });
   });
@@ -3537,7 +5026,7 @@ function checkPinTab(){
 
 function renderAdminContent(){
   const nPoli = Object.keys(POLIGONOS).length;
-  const nPoliActiva = nPoligonosFincaActiva();  // v25c: solo finca activa
+  const nPoliActiva = nPoligonosFincaActiva();  // v25d: solo finca activa
   const nSac = sacudidas().length;
   const nMues = muestreos().length;
   const plaguero = localStorage.getItem(K_PLAGUERO) || "";
@@ -3553,12 +5042,14 @@ function renderAdminContent(){
     const catDescTS = localStorage.getItem(K_CATALOGO_DESC);
     const catDescFecha = catDescTS ? new Date(catDescTS).toLocaleString("es-ES",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}) : null;
     const nPlagas = CATALOGO.length;
+    const nRegistros = CATALOGO.reduce((t, p) => t + (Array.isArray(p.regs) ? regsActivos(p).length : 0), 0);
     const catOK = nPlagas > 0 && fincas.length > 0;
     // Panel de estado catálogo/fincas
     html += '<div style="background:'+(catOK ? '#eef4ec' : '#fdecea')+';border:1px solid '+(catOK ? '#c8dfd2' : '#c33')+';border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:11px;color:#5b6467">'+
       '<div style="font-weight:700;color:'+(catOK ? '#0b6e4f' : '#c33')+';margin-bottom:4px">Estado de catálogos</div>'+
       '<div>Fincas: <b>'+fincas.length+'</b> disponibles</div>'+
       '<div>Plagas: <b>'+nPlagas+'</b> disponibles'+(catDescFecha ? ' · última descarga: '+catDescFecha : ' · sin descargar')+'</div>'+
+      (nPlagas > 0 ? '<div>Registros (órgano · tipo): '+(nRegistros > 0 ? '<b>'+nRegistros+'</b>' : '<b style="color:#c33">modelo antiguo · pulsa Actualizar catálogos</b>')+'</div>' : '')+
     '</div>';
 
     html += '<div style="background:#fff5e0;border:1px solid #e6c98a;border-radius:8px;padding:12px;margin-bottom:14px">'+
@@ -3619,7 +5110,7 @@ function renderAdminContent(){
     html += '<p style="color:#5b6467;font-size:13px;margin:0 0 12px">'+nPoli+' parcelas · '+nMues+' muestreos · '+nSac+' sacudidas</p>';
 
     // ============================================================
-    // v25c: FLUJO REORGANIZADO
+    // v25d: FLUJO REORGANIZADO
     // Bloque A → Mapa de la finca activa (descarga del servidor)
     // Bloque B → Mapas offline (imágenes satélite) — depende del A
     // Bloque C → Opciones avanzadas (colapsable): KMZ manual + descargar TODAS
@@ -3720,7 +5211,7 @@ function renderAdminContent(){
     html += '<details style="margin-top:20px;padding-top:14px;border-top:1px solid #eee">'+
       '<summary style="cursor:pointer;padding:8px 12px;background:#f0f2f0;border:1px solid #d5dad8;border-radius:6px;font-size:12px;color:#5b6467;font-weight:600">🛠 Datos y almacenamiento</summary>'+
       '<div style="padding:10px 4px 0;display:flex;flex-direction:column;gap:8px">';
-    // v25c: Botón actualizar app (útil cuando la app está instalada como PWA
+    // v25d: Botón actualizar app (útil cuando la app está instalada como PWA
     // y no hay navegador visible para forzar reload)
     html += '<div style="background:#eef4fc;border:1px solid #b8d3ee;border-radius:6px;padding:10px">'+
       '<div style="font-weight:600;font-size:12px;color:#1b5e9e;margin-bottom:4px">🔄 Actualizar app a la última versión</div>'+
@@ -3740,6 +5231,13 @@ function renderAdminContent(){
     html += '<div class="acc-guardar"><button class="btn btn-s" onclick="ir(\'sac\')">← Volver a Sacudir</button></div>';
 
     document.getElementById("admin-content").innerHTML = html;
+	
+	// Bloque de Cerrar Sesión en Admin
+	html += '<div style="background:#fdecea;border:1px solid #f5b5b0;border-radius:8px;padding:12px;margin-top:14px">'+
+	  '<div style="font-weight:700;font-size:14px;color:#c33;margin-bottom:4px">🔒 Control de Sesión</div>'+
+	  '<div style="font-size:12px;color:#5b6467;margin-bottom:8px">Cierra la sesión actual para desvincular este dispositivo o cambiar de usuario.</div>'+
+	  '<button class="btn btn-s" style="background:#c33;color:#fff;border:none;padding:10px 16px;border-radius:6px;cursor:pointer;font-size:13px;width:100%" onclick="cerrarSesionApp()">Cerrar sesión</button>'+
+	'</div>';
 
     // Rellenar filtros del explorador si existe
     const selP = document.getElementById("filt-parc");
@@ -3889,7 +5387,7 @@ async function guardarFincaActiva(){
   aviso("✓ Finca activa guardada: " + f.nombre_completo);
   renderAdminContent(); // refresca para mostrar la nueva finca activa
 
-  // v25c: forzar reencuadre del mapa la próxima vez que se abra
+  // v25d: forzar reencuadre del mapa la próxima vez que se abra
   // (aunque el usuario no cambie de vista, el mapa se ajustará a la nueva finca)
   MAPA.ultimaFincaId = null;
   // Si el mapa está actualmente visible, redibujarlo YA
@@ -3898,7 +5396,7 @@ async function guardarFincaActiva(){
     setTimeout(() => pintarMapaGrande(), 100);
   }
 
-  // v25c: comprobar si esta finca tiene polígonos descargados
+  // v25d: comprobar si esta finca tiene polígonos descargados
   // Si no, ofrecer descargarlos automáticamente (flujo lógico de configuración)
   setTimeout(async () => {
     const nPoliActiva = nPoligonosFincaActiva();
@@ -3979,13 +5477,13 @@ function procesarGeoJSON(txt){
 }
 
 // ============================================================
-// DESCARGA DE POLÍGONOS DESDE SERVIDOR (v25c)
+// DESCARGA DE POLÍGONOS DESDE SERVIDOR (v25d)
 // ============================================================
 // Descarga las parcelas con geometría desde Supabase y las convierte
 // al formato interno que usa la app (mismo que produce el KMZ).
 // Formato interno: { "ALIA1": [[lon,lat],[lon,lat],...], "ALIA30": [...] }
 //
-// v25c: refactorizado en 3 funciones:
+// v25d: refactorizado en 3 funciones:
 //   - _descargarPoligonosCore(filtroSupabase, btn)  → función interna
 //   - descargarPoligonosFincaActiva()               → solo finca activa (flujo lógico)
 //   - descargarPoligonosServidor()                  → todas las fincas (opción avanzada)
@@ -4049,7 +5547,7 @@ async function _descargarPoligonosCore(filtroSupabase, btn, mensajeExito){
   }
 }
 
-// v25c: descarga los polígonos SOLO de la finca activa (flujo lógico normal).
+// v25d: descarga los polígonos SOLO de la finca activa (flujo lógico normal).
 async function descargarPoligonosFincaActiva(){
   const fA = fincaActiva();
   if(!fA){
@@ -4076,7 +5574,7 @@ async function descargarPoligonosFincaActiva(){
   }, 400);
 }
 
-// v25c: descarga TODOS los polígonos de todas las fincas (opción avanzada).
+// v25d: descarga TODOS los polígonos de todas las fincas (opción avanzada).
 async function descargarPoligonosServidor(){
   const btn = event && event.target && event.target.tagName === "BUTTON" ? event.target : null;
   const r = await _descargarPoligonosCore(null, btn, null);
@@ -4112,7 +5610,7 @@ async function guardarPoligonos(nuevos){
     if(!ok) return;
   }
   POLIGONOS = nuevos;
-  // v25c: KMZ manual no trae finca_id, así que borramos la meta.
+  // v25d: KMZ manual no trae finca_id, así que borramos la meta.
   // La retrocompatibilidad hace que poligonosDeFincaActiva() devuelva TODO
   // cuando no hay meta, preservando el flujo antiguo.
   POLIGONOS_META = {};
@@ -4161,7 +5659,7 @@ async function borrarSacHoy(){
   if(S.admin) renderAdminContent();
 }
 
-// v25c: Actualizar app forzando descarga de nueva versión.
+// v25d: Actualizar app forzando descarga de nueva versión.
 // Útil especialmente cuando la app está instalada como PWA y no hay
 // barra de navegador visible para hacer "refrescar duro".
 // NO borra localStorage — solo cachés HTTP y service worker.
@@ -4263,7 +5761,7 @@ function modalConfirmar(opts){
   };
 }
 
-// v25c: wrapper con Promise para reemplazar confirm() nativo del navegador.
+// v25d: wrapper con Promise para reemplazar confirm() nativo del navegador.
 // Uso: const ok = await pregunta("¿Borrar?", "Esta acción no se puede deshacer.");
 // Devuelve true si acepta, false si cancela o cierra.
 // Parámetros opcionales:
@@ -4278,13 +5776,20 @@ function pregunta(titulo, mensaje, opts){
   // Reemplazar salto de línea "\n" por <br> para preservar formato de mensajes largos
   const mensajeHTML = String(mensaje || "").replace(/\n/g, "<br>");
   return new Promise((resolve) => {
-    // Reutilizamos el modalConfirmar existente
+    // v25d-fix: flag para evitar doble resolución. La acción del botón marca
+    // "resuelto" antes de que el MutationObserver detecte la desaparición del DOM.
+    let resuelto = false;
+    const resolver = (v) => {
+      if(resuelto) return;
+      resuelto = true;
+      resolve(v);
+    };
     modalConfirmar({
       titulo: titulo,
       mensaje: mensajeHTML,
       opciones: [
-        { texto: textoOK, color: colorOK, accion: () => resolve(true) },
-        { texto: textoCancel, color: "#8a9299", accion: () => resolve(false) }
+        { texto: textoOK, color: colorOK, accion: () => resolver(true) },
+        { texto: textoCancel, color: "#8a9299", accion: () => resolver(false) }
       ]
     });
     // Si el usuario cierra clicando fuera, el resolve queda pendiente.
@@ -4292,31 +5797,37 @@ function pregunta(titulo, mensaje, opts){
     const observador = new MutationObserver(() => {
       if(!document.getElementById("modal-confirmar")){
         observador.disconnect();
-        resolve(false);  // considerar cerrar-fuera como Cancelar
+        resolver(false);  // considerar cerrar-fuera como Cancelar (solo si no se resolvió ya)
       }
     });
     observador.observe(document.body, {childList:true});
   });
 }
 
-// v25c: helper alerta() con Promise - simple aviso con un solo botón.
+// v25d: helper alerta() con Promise - simple aviso con un solo botón.
 // Uso: await alerta("Aviso", "El servidor no responde");
 function alerta(titulo, mensaje, opts){
   opts = opts || {};
   const textoOK = opts.textoOK || "Entendido";
   const mensajeHTML = String(mensaje || "").replace(/\n/g, "<br>");
   return new Promise((resolve) => {
+    let resuelto = false;
+    const resolver = () => {
+      if(resuelto) return;
+      resuelto = true;
+      resolve(true);
+    };
     modalConfirmar({
       titulo: titulo,
       mensaje: mensajeHTML,
       opciones: [
-        { texto: textoOK, color: "#0b6e4f", accion: () => resolve(true) }
+        { texto: textoOK, color: "#0b6e4f", accion: () => resolver() }
       ]
     });
     const observador = new MutationObserver(() => {
       if(!document.getElementById("modal-confirmar")){
         observador.disconnect();
-        resolve(true);
+        resolver();
       }
     });
     observador.observe(document.body, {childList:true});

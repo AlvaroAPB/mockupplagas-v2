@@ -1,5 +1,5 @@
 /**
- * Service Worker para Sacudidas v24h.2
+ * Service Worker para Sacudidas v26c
  * Estrategia: cache-first para app shell + librerías, network-first para Supabase
  *
  * Al desplegar nueva versión:
@@ -9,7 +9,7 @@
  *   4. Elimina automáticamente cachés antiguas.
  */
 
-const CACHE_VERSION = "monitoreo-v25c-3";
+const CACHE_VERSION = "monitoreo-v26c-1";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -57,7 +57,11 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
 
-  if (url.hostname.includes("supabase.co")) return;
+  // v26a: la API de Supabase (nube o autoalojada) NUNCA se cachea.
+  // Se reconoce por la ruta, no por el dominio.
+  const esAPI = url.hostname.includes("supabase.co") ||
+    /^\/(rest|auth|storage|realtime|functions)\/v1\//.test(url.pathname);
+  if (esAPI) return;
 
   if (
     url.hostname.includes("googleapis.com") ||
